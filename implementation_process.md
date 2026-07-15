@@ -42,4 +42,97 @@ Each completed stage records:
 
 ## Stage log
 
-Stage entries will be appended here as implementation proceeds.
+### Stage 0 — Minimal scaffolding
+
+#### Scope and files
+
+- Added `pyproject.toml` with setuptools packaging, Python 3.11+, NumPy,
+  Matplotlib, pytest, and Ruff.
+- Added `src/kcon_uwsn/__init__.py`, `tests/`, and
+  `docs/paper_traceability.md`.
+- Added `.gitignore` rules for Python, local environments, solver files, and
+  generated results.
+- Expanded `README.md` with project navigation and development setup.
+- Created a local `.venv` and installed the package in editable mode.
+
+#### Decisions
+
+- NumPy supports environment calculations; Matplotlib is present now because
+  Fig. 3(a)/(b) is a primary deliverable.
+- PuLP and HiGHS remain deferred until Stage 5, when the first optimization
+  model is introduced.
+- The package uses a `src/` layout to prevent tests from accidentally importing
+  code directly from the repository root.
+- Generated solver and figure artifacts are ignored; source, tests, and
+  documentation remain version-controlled.
+
+#### Verification
+
+- Editable installation completed under Python 3.13.10.
+- Package tests and Ruff are configured through `pyproject.toml`.
+
+#### Paper relationship
+
+Stage 0 is implementation scaffolding and does not encode paper behavior.
+
+### Stage 1 — Parameters and notation
+
+#### Scope and files
+
+- Added immutable `NetworkParameters`, `AcousticParameters`,
+  `PowerLevelTable`, `ExperimentParameters`, and `PaperParameters` in
+  `src/kcon_uwsn/params.py`.
+- Added 14 focused tests in `tests/test_params.py`.
+- Added Stage 1 mappings to `docs/paper_traceability.md`.
+
+#### Paper sources
+
+- Section III-A and Table I: timing, traffic, data rate, path, interference,
+  connectivity, and deployment parameters.
+- Section III-B, Eqs. (1)–(5), and Tables I–II: acoustic constants,
+  transmission ranges, and published energy references.
+- Fig. 1: default 30-sensor, 1×3×0.30 km deployment scale.
+- Tables III–IV: `(|W_1|, |W_2|, |W_3|)` cardinality convention.
+
+#### Decisions
+
+- Table II energies are retained in their published mJ/bit unit for reference
+  and exposed through an explicit J/bit conversion for later optimization.
+- `PowerLevelTable` is reference data only. Eqs. (1)–(5) will be calculated in
+  Stage 3 and checked against the published rounded values.
+- `ExperimentParameters.connectivity_counts` stores partition cardinalities;
+  explicit sensor membership remains a Stage 4 environment responsibility.
+- Defaults use `ξ=1`, matching the value selected after the Section IV-A
+  control-frequency analysis.
+- Validation rejects values outside the paper's `ξ ∈ [0.25,4]` and
+  `κ ∈ [1,3]` analysis ranges rather than silently extrapolating.
+- All dataclasses are frozen so paper constants cannot change during a run.
+
+#### Ambiguities and differences
+
+- The paper gives a deployment dimension range and several configurations, not
+  one universal default. The 1×3×0.30 km Fig. 1 deployment is used as the
+  general default; later figure-specific settings will override it explicitly.
+- The implementation uses descriptive names with units while retaining paper
+  symbols in docstrings and traceability records.
+
+#### Verification
+
+Commands:
+
+```shell
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+```
+
+Results: 14 tests passed; Ruff reported no issues. The IDE's basedpyright
+instance warns that `pytest` is unresolved because it is not currently using
+the project `.venv`; pytest itself imports and runs successfully inside the
+documented environment.
+
+#### Review before Stage 2
+
+- Confirm the parameter grouping and the 30-sensor 1×3×0.30 km default.
+- Confirm that paper-range validation should remain strict.
+- Stage 2 must not add energy calculations; it is limited to deployment,
+  distances, and directed arc construction.
