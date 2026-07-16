@@ -32,6 +32,29 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Tests: `test_default_experiment_matches_figure_1_scale` and partition
     validation tests.
 
+## Stage 2 — Network environment
+
+- `Deployment` and `generate_uniform_deployment`
+  - Source: Section III-A and Fig. 1.
+  - Symbols: `V`, `W`, `d_x`, `d_y`, and `d_z`.
+  - Tests: reproducibility, corner BS, prism bounds, 2D cross section, and
+    immutable position tests in `test_environment.py`.
+- `pairwise_distances`
+  - Source: Section III-A and Table I.
+  - Symbol: `d_ij`.
+  - Test: `test_pairwise_distances_are_euclidean_symmetric_and_zero_diagonal`.
+- `build_directed_arcs`
+  - Source: Section III-A graph definition.
+  - Symbols: `A` and `R_max(l_max)`.
+  - Test:
+    `test_directed_arcs_include_range_boundary_and_exclude_self_loops`.
+- `NetworkEnvironment` and `build_network_environment`
+  - Source: Section III-A definition `G=(V,A)`.
+  - Tests: graph-set, arc-consistency, and immutable-distance tests.
+- `build_paper_network_environment`
+  - Source: Section III-A and Table II.
+  - Test: `test_paper_network_uses_table_ii_maximum_range`.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -43,3 +66,10 @@ separately. The matrix is updated after each reviewed implementation stage.
   belongs to the Stage 4 environment implementation.
 - Validation limits `ξ` and `κ_n` to the ranges analyzed in Table I. Supporting
   extrapolation beyond those ranges would require an explicit later decision.
+- Coordinates use meters with `x∈[-d_x/2,d_x/2]`, `y∈[0,d_y]`, and
+  `z∈[-d_z,0]`; the BS is at `(-d_x/2,0,0)`. The paper specifies a top corner
+  but does not prescribe a coordinate origin.
+- Nodes are zero-based with the BS at index 0. This differs from the MILP
+  equations' BS index 1 and is documented in code.
+- The arc comparison is inclusive (`d_ij≤R_max(l_max)`) and creates both
+  directed arcs when a symmetric acoustic range connects two nodes.
