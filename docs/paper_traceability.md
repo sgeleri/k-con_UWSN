@@ -55,6 +55,31 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Source: Section III-A and Table II.
   - Test: `test_paper_network_uses_table_ii_maximum_range`.
 
+## Stage 3 — Acoustic energy environment
+
+- `absorption_coefficient_db_per_km`
+  - Source: Section III-B, Eq. (2).
+  - Symbol: `alpha(f_0)`.
+  - Test: `test_absorption_coefficient_matches_equation_2`.
+- `frequency_component` and `transmission_loss`
+  - Source: Section III-B, Eq. (1) and its following definition.
+  - Symbols: `nu` and `TL(R_max(l))`.
+  - Tests: frequency-component and transmission-loss equation tests.
+- `transmission_energy_j_per_bit` and
+  `power_level_energies_j_per_bit`
+  - Source: Section III-B, Eq. (3), and Table II.
+  - Symbol: `E_T(l)`.
+  - Tests: Eq. (3) and all-power-level Table II comparison tests.
+- `minimum_link_transmission_energy_j_per_bit`
+  - Source: Section III-B, Eq. (5).
+  - Symbol: `E*_T,ij`.
+  - Tests: all range-boundary cases and the beyond-range infinity case.
+- `AcousticEnergyEnvironment` and `build_acoustic_energy_environment`
+  - Source: Section III-B, Eqs. (1)–(5).
+  - Symbols: `E*_T,ij` and `E_R`.
+  - Tests: per-arc power selection, Eq. (4) reception cost, and immutable
+    coefficient mapping.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -73,3 +98,11 @@ separately. The matrix is updated after each reviewed implementation stage.
   equations' BS index 1 and is documented in code.
 - The arc comparison is inclusive (`d_ij≤R_max(l_max)`) and creates both
   directed arcs when a symmetric acoustic range connects two nodes.
+- Equations (1)–(3), rather than the rounded Table II values, are authoritative
+  for generated transmission energies. Calculated values are compared to Table
+  II within 0.001 mJ/bit (one unit of its last published decimal place).
+- Direct calculation gives 9.567450 mJ/bit for level 9 while Table II prints
+  9.568 mJ/bit. This small discrepancy is recorded rather than hidden by
+  altering the published equations.
+- Per-arc transmission energies are stored as an immutable mapping keyed by
+  exactly the directed arc set `A`; all MILP-facing energies use J/bit.

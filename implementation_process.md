@@ -207,3 +207,69 @@ arcs, disconnected sensors, and malformed input.
 - Confirm that a reachable physical pair should produce both directed arcs.
 - Stage 3 will add Eqs. (1)–(5) only and validate calculated transmission
   energies against Table II.
+
+### Stage 3 — Acoustic energy environment
+
+#### Scope and files
+
+- Extended `src/kcon_uwsn/environment.py` with the acoustic calculations from
+  Eqs. (1)–(5).
+- Added `AcousticEnergyEnvironment`, containing calculated coefficients,
+  power-level energies, Eq. (4) reception energy, and immutable per-arc
+  transmission energies.
+- Exported the Stage 3 API from `src/kcon_uwsn/__init__.py`.
+- Added 18 focused tests in `tests/test_energy_environment.py`.
+- Updated `docs/paper_traceability.md`.
+
+#### Paper sources
+
+- Section III-B, Eq. (1): transmission loss at `R_max(l)`.
+- Section III-B after Eq. (1): `nu=10^(alpha(f_0)/10)`.
+- Eq. (2): Thorp absorption coefficient.
+- Eqs. (3)–(4): transmission and reception energy per bit.
+- Eq. (5): minimum power-level energy for link `(i,j)`.
+- Tables I–II: acoustic constants, ranges, and reference energies.
+
+#### Decisions
+
+- Functions accept distances in meters and explicitly apply Eq. (1)'s `10^-3`
+  conversion in the absorption exponent.
+- Equations (1)–(3) are authoritative. Table II is treated as rounded
+  validation data rather than as the source of calculated coefficients.
+- Eq. (5) uses inclusive range boundaries. A distance above 1000 m returns
+  infinity, exactly as the equation states; graph arcs remain limited to
+  reachable distances and therefore receive finite energies.
+- Eq. (4) is represented directly by `P_r` from `AcousticParameters`.
+- Per-arc energies use an immutable mapping whose keys must equal `A`.
+
+#### Ambiguities and numerical observations
+
+- Direct use of the printed equations gives 9.567450 mJ/bit at level 9, while
+  Table II reports 9.568 mJ/bit. The 0.000550 mJ/bit difference is slightly
+  larger than half of the last printed decimal unit and may result from
+  intermediate precision or rounding not described in the paper.
+- The implementation does not tune constants to force a match. All calculated
+  levels must instead agree with Table II within 0.001 mJ/bit, one unit of its
+  final published decimal place.
+
+#### Verification
+
+Commands:
+
+```shell
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+```
+
+Tests cover the numerical result of each equation, all ten Table II levels,
+every Eq. (5) range boundary, the infinity branch, per-arc energy selection,
+reception cost, immutability, and invalid inputs. Results: 44 tests passed;
+Ruff and `git diff --check` reported no issues.
+
+#### Review before Stage 4
+
+- Confirm that calculated Eq. (1)–(3) values should remain authoritative over
+  rounded Table II values.
+- Confirm the documented 0.001 mJ/bit Table II comparison tolerance.
+- Stage 4 will add only `W_n`/`kappa_n` assignment and Eq. (26) interference
+  preprocessing.

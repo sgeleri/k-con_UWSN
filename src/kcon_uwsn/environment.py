@@ -7,18 +7,20 @@ later stages.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .params import ExperimentParameters, PowerLevelTable
+from .params import AcousticParameters, ExperimentParameters, PowerLevelTable
 
 FloatArray  = NDArray[np.float64]
 DirectedArc = tuple[int, int]
 
 
-def _immutable_float_array(values: object) -> FloatArray :
+def _immutable_float_array(values : object) -> FloatArray :
     """Return an owned, read-only float64 array."""
 
     array = np.array(values, dtype=np.float64, copy=True)
@@ -27,7 +29,7 @@ def _immutable_float_array(values: object) -> FloatArray :
 
 
 @dataclass(frozen=True, slots=True)
-class Deployment:
+class Deployment :
     """Positions of one base station and stationary underwater sensors.
 
     Paper: Section III-A and Fig. 1.
@@ -81,7 +83,7 @@ class Deployment:
 
 
 @dataclass(frozen=True, slots=True)
-class NetworkEnvironment:
+class NetworkEnvironment :
     """Geometry and directed graph primitives from Section III-A."""
 
     deployment                      : Deployment
@@ -138,9 +140,9 @@ class NetworkEnvironment:
 
 
 def generate_uniform_deployment(
-    experiment: ExperimentParameters,
+    experiment      : ExperimentParameters, 
     *,
-    two_dimensional: bool = False,
+    two_dimensional : bool = False,
 ) -> Deployment :
     """Generate the stationary uniform deployment described in Section III-A.
 
@@ -162,7 +164,10 @@ def generate_uniform_deployment(
     dx_m, dy_m, dz_m    = (dimension * 1000.0 for dimension in experiment.volume_km)
     rng                 = np.random.default_rng(experiment.random_seed)
 
-    positions           = np.empty((experiment.number_of_sensors + 1, 3), dtype=np.float64)
+    positions = np.empty(
+        (experiment.number_of_sensors + 1, 3),
+        dtype=np.float64,
+    )
     positions[0]        = (-dx_m / 2.0, 0.0, 0.0)
     positions[1:, 0]    = rng.uniform(
         -dx_m / 2.0,
@@ -194,8 +199,8 @@ def pairwise_distances(positions_m: FloatArray) -> FloatArray :
 
 
 def build_directed_arcs(
-    distances_m: FloatArray,
-    maximum_transmission_range_m: float,
+    distances_m                     : FloatArray,
+    maximum_transmission_range_m    : float,
 ) -> tuple[DirectedArc, ...] :
     """Build ``A={(i,j): i!=j, d_ij<=R_max(l_max)}``.
 
@@ -224,8 +229,8 @@ def build_directed_arcs(
 
 
 def build_network_environment(
-    deployment: Deployment,
-    maximum_transmission_range_m: float,
+    deployment                      : Deployment,
+    maximum_transmission_range_m    : float,
 ) -> NetworkEnvironment :
     """Build the Section III-A graph primitives for a deployment."""
 
@@ -241,10 +246,10 @@ def build_network_environment(
 
 
 def build_paper_network_environment(
-    experiment: ExperimentParameters,
+    experiment          : ExperimentParameters,
     *,
-    power_levels: PowerLevelTable | None = None,
-    two_dimensional: bool = False,
+    power_levels        : PowerLevelTable | None = None,
+    two_dimensional     : bool = False,
 ) -> NetworkEnvironment :
     """Generate a deployment and graph using ``R_max(l_max)`` from Table II."""
 
@@ -255,3 +260,227 @@ def build_paper_network_environment(
     )
     
     return build_network_environment(deployment, table.ranges_m[-1])
+
+
+def absorption_coefficient_db_per_km(operating_frequency_khz: float) -> float :
+    """Calculate the absorption coefficient ``alpha(f_0)``.
+
+    Paper: Section III-B, Eq. (2). Frequency is expressed in kHz and the
+    returned coefficient is in dB/km.
+    """
+
+    if operating_frequency_khz <= 0 :
+        raise ValueError("operating_frequency_khz must be positive")
+
+    frequency_squared = operating_frequency_khz**2
+    return (
+        0.11 * frequency_squared / (1.0 + frequency_squared)
+        + 44.0 * frequency_squared / (4100.0 + frequency_squared)
+        + 2.75e-4 * frequency_squared
+        + 0.003
+    )
+
+
+def frequency_component(absorption_db_per_km: float) -> float :
+    """Calculate ``nu=10^(alpha(f_0)/10)`` used by Eq. (1).
+
+    Paper: Section III-B, definition immediately following Eq. (1).
+    """
+
+    if absorption_db_per_km < 0 :
+        raise ValueError("absorption_db_per_km cannot be negative")
+    return 10.0 ** (absorption_db_per_km / 10.0)
+
+
+def transmission_loss(
+    distance_m                      : float,
+    spreading_factor                : float,
+    frequency_dependent_component   : float,
+) -> float :
+    """Calculate acoustic ``TL(R_max(l))`` for a distance in meters.
+
+    Paper: Section III-B, Eq. (1). The ``10^-3`` factor converts the supplied
+    meter distance to kilometers in the absorption term.
+    """
+
+    if distance_m <= 0 :
+        raise ValueError("distance_m must be positive")
+
+    if spreading_factor <= 0 :
+        raise ValueError("spreading_factor must be positive")
+        
+    if frequency_dependent_component <= 0 :
+        raise ValueError("frequency_dependent_component must be positive")
+
+    return distance_m**spreading_factor * frequency_dependent_component ** (
+        1e-3 * distance_m
+    )
+
+
+def transmission_energy_j_per_bit(
+    loss                                : float,
+    desired_receiver_input_j_per_bit    : float,
+) -> float :
+    """Calculate ``E_T(l)`` in J/bit.
+
+    Paper: Section III-B, Eq. (3).
+    """
+
+    if loss <= 0 :
+        raise ValueError("loss must be positive")
+
+    if desired_receiver_input_j_per_bit <= 0 :
+        raise ValueError("desired_receiver_input_j_per_bit must be positive")
+
+    return loss * desired_receiver_input_j_per_bit
+
+
+def power_level_energies_j_per_bit(
+    acoustic        : AcousticParameters,
+    power_levels    : PowerLevelTable,
+) -> tuple[float, ...] :
+    """Calculate ``E_T(l)`` for all ten Table II power levels.
+
+    Paper: Section III-B, Eqs. (1)–(3), and Table II.
+    """
+
+    alpha       = absorption_coefficient_db_per_km(acoustic.operating_frequency_khz)
+    component   = frequency_component(alpha)
+    return tuple(
+        transmission_energy_j_per_bit(
+            transmission_loss(
+                distance_m                      = distance_m,
+                spreading_factor                = acoustic.spreading_factor,
+                frequency_dependent_component   = component,
+            ),
+            acoustic.desired_receiver_input_j_per_bit,
+        )
+        for distance_m in power_levels.ranges_m
+    )
+
+
+def minimum_link_transmission_energy_j_per_bit(
+    distance_m                  : float,
+    power_levels                : PowerLevelTable,
+    level_energies_j_per_bit    : tuple[float, ...],
+) -> float :
+    """Select the minimum power level covering ``d_ij``.
+
+    Paper: Section III-B, Eq. (5). A distance equal to a range boundary uses
+    that level. Distances beyond ``R_max(10)`` have infinite energy.
+    """
+
+    if distance_m < 0 :
+        raise ValueError("distance_m cannot be negative")
+
+    if len(level_energies_j_per_bit) != len(power_levels.levels) :
+        raise ValueError("one energy value is required for each power level")
+        
+    if any(energy <= 0 for energy in level_energies_j_per_bit) :
+        raise ValueError("power-level energies must be positive")
+
+    for maximum_range_m, energy in zip(
+        power_levels.ranges_m,
+        level_energies_j_per_bit,
+        strict=True,
+    ):
+        if distance_m <= maximum_range_m:
+            return energy
+    return float("inf")
+
+
+@dataclass(frozen=True, slots=True)
+class AcousticEnergyEnvironment :
+    """Acoustic coefficients and per-arc energies from Section III-B."""
+
+    network                                 : NetworkEnvironment
+    absorption_db_per_km                    : float
+    frequency_dependent_component           : float
+    transmission_loss_by_level              : tuple[float, ...]
+    transmission_energy_by_level_j_per_bit  : tuple[float, ...]
+    reception_energy_j_per_bit              : float
+    link_transmission_energy_j_per_bit      : Mapping[DirectedArc, float]
+
+    def __post_init__(self) -> None :
+        number_of_levels = len(self.transmission_loss_by_level)
+        
+        if number_of_levels != 10 :
+            raise ValueError("the paper's energy model requires 10 power levels")
+
+        if len(self.transmission_energy_by_level_j_per_bit) != number_of_levels :
+            raise ValueError("loss and energy tuples must have equal lengths")
+
+        if self.absorption_db_per_km < 0 :
+            raise ValueError("absorption_db_per_km cannot be negative")
+
+        if self.frequency_dependent_component <= 0 :
+            raise ValueError("frequency_dependent_component must be positive")
+
+        if self.reception_energy_j_per_bit <= 0 :
+            raise ValueError("reception_energy_j_per_bit must be positive")
+
+        link_energies = dict(self.link_transmission_energy_j_per_bit)
+        if set(link_energies) != set(self.network.arcs):
+            raise ValueError("link energy keys must equal the directed arc set A")
+        
+        invalid_energy = any(
+            not np.isfinite(value) or value <= 0 for value in link_energies.values()
+        )
+        if invalid_energy :
+            raise ValueError("every arc must have a finite positive energy")
+
+        object.__setattr__(
+            self,
+            "link_transmission_energy_j_per_bit",
+            MappingProxyType(link_energies),
+        )
+
+
+def build_acoustic_energy_environment(
+    network         : NetworkEnvironment,
+    *,
+    acoustic        : AcousticParameters | None = None,
+    power_levels    : PowerLevelTable | None = None,
+) -> AcousticEnergyEnvironment:
+    """Build all Section III-B coefficients needed by the later MILP."""
+
+    acoustic_parameters = acoustic or AcousticParameters()
+    table               = power_levels or PowerLevelTable()
+    alpha               = absorption_coefficient_db_per_km(
+                            acoustic_parameters.operating_frequency_khz
+                        )
+    component           = frequency_component(alpha)
+    losses              = tuple(
+                            transmission_loss(
+                                distance_m                      = distance_m,
+                                spreading_factor                = acoustic_parameters.spreading_factor,
+                                frequency_dependent_component   = component,
+                            )
+                            for distance_m in table.ranges_m
+                        )
+    level_energies      = tuple(
+                            transmission_energy_j_per_bit(
+                                loss,
+                                acoustic_parameters.desired_receiver_input_j_per_bit,
+                            )
+                            for loss in losses
+                        )
+    link_energies       = {
+                            arc: minimum_link_transmission_energy_j_per_bit(
+                                network.distances_m[arc],
+                                table,
+                                level_energies,
+                            )
+                            for arc in network.arcs
+                        }
+
+    return AcousticEnergyEnvironment(
+        network                                 = network,
+        absorption_db_per_km                    = alpha,
+        frequency_dependent_component           = component,
+        transmission_loss_by_level              = losses,
+        transmission_energy_by_level_j_per_bit  = level_energies,
+        # Paper: Section III-B, Eq. (4), E_R=P_r.
+        reception_energy_j_per_bit              = acoustic_parameters.reception_energy_j_per_bit,
+        link_transmission_energy_j_per_bit      = link_energies,
+    )
