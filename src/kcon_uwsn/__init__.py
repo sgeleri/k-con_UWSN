@@ -32,6 +32,7 @@ from .params import (
     PaperParameters,
     PowerLevelTable,
 )
+from .solution import Solution, extract_solution
 
 __all__ = [
     "AcousticParameters",
@@ -46,6 +47,7 @@ __all__ = [
     "NetworkEnvironment",
     "PaperParameters",
     "PowerLevelTable",
+    "Solution",
     "absorption_coefficient_db_per_km",
     "build_acoustic_energy_environment",
     "build_directed_arcs",
@@ -57,6 +59,7 @@ __all__ = [
     "build_paper_network_environment",
     "build_seeded_connectivity_partition",
     "frequency_component",
+    "extract_solution",
     "generate_uniform_deployment",
     "minimum_link_transmission_energy_j_per_bit",
     "pairwise_distances",

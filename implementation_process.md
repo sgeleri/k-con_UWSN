@@ -474,3 +474,62 @@ changed locally if stronger source evidence is found.
 - Confirm control traffic should continue requiring symmetric directed arcs.
 - Stage 11 will extract paths, objective, node energy, and airtime diagnostics
   without changing the mathematical formulation.
+
+### Stage 11 — Solution extraction
+
+#### Scope and files
+
+- Added `src/kcon_uwsn/solution.py` with an immutable, solver-independent
+  `Solution` dataclass.
+- Added extraction of status, `epsilon`, nonzero `f/g/h/p`, packet allocations,
+  and ordered source-to-BS paths.
+- Added independently evaluated per-node energy and airtime diagnostics.
+- Added packet-balance, connectivity-shortfall, energy-violation, and
+  airtime-violation diagnostics.
+- Exported `Solution` and `extract_solution` from the package.
+- Added 8 focused tests in `tests/test_solution.py`.
+
+#### Paper sources
+
+- Objective (6): objective energy `epsilon`.
+- Constraint (8): generated-packet balance by source.
+- Constraints (12)–(20): non-bifurcating, disjoint path reconstruction.
+- Constraint (18): active path count versus required `kappa`.
+- Constraint (21): per-sensor transmit/receive energy.
+- Constraint (22) and Eq. (26): per-node airtime.
+
+#### Decisions
+
+- The result contains plain numbers and immutable mappings, not PuLP objects,
+  so plotting and the later runner do not depend on solver internals.
+- Models without an incumbent return a status-only solution instead of raising
+  while reading undefined variable values.
+- Decision-variable maps are sparse: only nonzero `f`, `g`, `p`, and active
+  `h` values are retained.
+- Path arcs are ordered by following the unique next hop from source to BS.
+  Branches, cycles, and disconnected active arcs raise explicit errors because
+  they would contradict the implemented path constraints.
+- Energy and airtime are recomputed directly from extracted flows and
+  environment coefficients. This independently checks Constraints (21)–(22)
+  rather than trusting their stored solver slacks.
+- Numerical extraction uses a configurable positive tolerance, defaulting to
+  `1e-7`.
+
+#### Verification
+
+- An unsolved model produces `Not Solved` with no incumbent values.
+- A solved `kappa=2` case returns contiguous, cycle-free source-to-BS paths.
+- Every source has zero packet-balance error and zero connectivity shortfall.
+- Maximum recomputed sensor energy agrees with `epsilon`.
+- Recomputed node airtime satisfies Constraint (22).
+- Extracted mappings reject mutation.
+- Full verification reports 77 passing tests; Ruff, IDE diagnostics, and
+  `git diff --check` report no issues.
+
+#### Review before Stage 12
+
+- Confirm the sparse solution representation and strict path validation.
+- Confirm that status-only extraction is preferred over exceptions for models
+  without an incumbent.
+- Stage 12 will add CLI orchestration and solver options without altering the
+  environment, formulation, or extraction calculations.

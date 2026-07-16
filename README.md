@@ -16,8 +16,9 @@ to paper sections, equations, tables, and figures.
 
 Stages 0–10 provide paper parameters, complete environment preprocessing, and
 the PuLP formulation through Constraints (7)–(25), including routing,
-disjointness, control traffic, energy, bandwidth, and interference. Solution
-extraction, the runner, and figure generation follow in later reviewed stages.
+disjointness, control traffic, energy, bandwidth, and interference. Stage 11
+adds solver-independent solution/path/resource diagnostics. The runner and
+figure generation follow in later reviewed stages.
 
 ## Development setup
 

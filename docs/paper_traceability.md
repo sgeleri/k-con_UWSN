@@ -160,6 +160,21 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Test: the two-sensor complete graph has 385 named constraints and solves
     optimally with HiGHS.
 
+## Stage 11 — Solution extraction
+
+- `Solution` and `extract_solution`
+  - Source: Objective (6) and Constraints (8), (12)–(22).
+  - Outputs: solver status, `epsilon`, nonzero `f/g/h/p`, ordered paths,
+    per-node energy, per-node airtime, path counts, and residual diagnostics.
+  - Tests: status-only extraction, sparse values, contiguous source-to-BS
+    paths, packet balance, `kappa` satisfaction, energy/objective agreement,
+    airtime feasibility, and immutable results in `test_solution.py`.
+- `_node_energy`
+  - Source: Constraint (21).
+- `_node_airtime`
+  - Source: Constraint (22) and Eq. (26), with the documented `A\\{i}`
+    interpretation.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -205,3 +220,11 @@ separately. The matrix is updated after each reviewed implementation stage.
 - Constraint (22)'s printed `A\\{i}` domain is interpreted as arcs not incident
   to node `i`. Own incident arcs are already charged by the transmission and
   reception terms, so this prevents duplicate airtime accounting.
+- Solution extraction returns a status-only object when no incumbent exists,
+  allowing the later runner to report unsolved/infeasible models without
+  reading undefined PuLP values.
+- Only nonzero decision values are retained. Active arcs are ordered from each
+  source to the BS and extraction fails loudly if a solved arc set branches,
+  cycles, or contains disconnected components.
+- Energy and airtime diagnostics are recomputed independently from extracted
+  values rather than copied from constraint slacks.
