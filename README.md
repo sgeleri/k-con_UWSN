@@ -14,9 +14,10 @@ to paper sections, equations, tables, and figures.
 
 ## Current scope
 
-Stages 0–1 provide the Python package scaffolding and immutable paper
-parameters. The environment, MILP, runner, and figure generation are added in
-later reviewed stages.
+Stages 0–5 provide paper parameters, network/acoustic/interference preprocessing,
+non-uniform connectivity partitions, and the PuLP variables/objective. Routing,
+resource constraints, the runner, and figure generation follow in later
+reviewed stages.
 
 ## Development setup
 
@@ -27,4 +28,4 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
-PuLP and HiGHS will be added when MILP implementation begins.
+PuLP and the open-source HiGHS backend are installed with the project.

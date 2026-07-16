@@ -14,7 +14,12 @@ from types import MappingProxyType
 import numpy as np
 from numpy.typing import NDArray
 
-from .params import AcousticParameters, ExperimentParameters, PowerLevelTable
+from .params import (
+    AcousticParameters,
+    ExperimentParameters,
+    PaperParameters,
+    PowerLevelTable,
+)
 
 FloatArray  = NDArray[np.float64]
 DirectedArc = tuple[int, int]
@@ -453,7 +458,9 @@ def build_acoustic_energy_environment(
     losses              = tuple(
                             transmission_loss(
                                 distance_m                      = distance_m,
-                                spreading_factor                = acoustic_parameters.spreading_factor,
+                                spreading_factor                = (
+                                                                    acoustic_parameters.spreading_factor
+                                                                ),
                                 frequency_dependent_component   = component,
                             )
                             for distance_m in table.ranges_m
@@ -481,6 +488,292 @@ def build_acoustic_energy_environment(
         transmission_loss_by_level              = losses,
         transmission_energy_by_level_j_per_bit  = level_energies,
         # Paper: Section III-B, Eq. (4), E_R=P_r.
-        reception_energy_j_per_bit              = acoustic_parameters.reception_energy_j_per_bit,
+        reception_energy_j_per_bit              = float  (
+                                                        acoustic_parameters.reception_energy_j_per_bit
+                                                    ),
         link_transmission_energy_j_per_bit      = link_energies,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectivityPartition:
+    """Disjoint sensor subsets ``W_n`` and their required ``kappa_n``.
+
+    Paper: Section III-A, Constraint (18), and Tables III-IV.
+    """
+
+    sensors         : tuple[int, ...]
+    sets_by_kappa   : Mapping[int, tuple[int, ...]]
+    kappa_by_sensor : Mapping[int, int]
+
+    def __post_init__(self) -> None :
+        sensors = tuple(self.sensors)
+        if len(set(sensors)) != len(sensors):
+            raise ValueError("sensor indices must be unique")
+
+        normalized_sets = {
+            int(kappa): tuple(nodes)
+            for kappa, nodes in self.sets_by_kappa.items()
+        }
+        assigned_nodes = [
+            node
+            for nodes in normalized_sets.values()
+            for node in nodes
+        ]
+        if len(set(assigned_nodes)) != len(assigned_nodes) :
+            raise ValueError("W_n subsets must be pairwise disjoint")
+
+        if set(assigned_nodes) != set(sensors) :
+            raise ValueError("W_n subsets must partition all sensors")
+
+        expected_mapping = {
+            node: kappa
+            for kappa, nodes in normalized_sets.items()
+            for node in nodes
+        }
+        supplied_mapping = dict(self.kappa_by_sensor)
+        if supplied_mapping != expected_mapping :
+            raise ValueError("kappa_by_sensor must agree with the W_n subsets")
+
+
+        object.__setattr__(self, "sensors", sensors)
+        object.__setattr__(
+            self,
+            "sets_by_kappa",
+            MappingProxyType(normalized_sets),
+        )
+        object.__setattr__(
+            self,
+            "kappa_by_sensor",
+            MappingProxyType(supplied_mapping),
+        )
+
+
+def build_explicit_connectivity_partition(
+    sensors             : tuple[int, ...],
+    sets_by_kappa       : Mapping[int, tuple[int, ...]],
+    *,
+    connectivity_range  : tuple[int, int] = (1, 3),
+    maximum_paths       : int = 5,
+) -> ConnectivityPartition :
+    """Build explicitly supplied ``W_n`` sets.
+
+    Paper: Section III-A, Constraint (18), and Table III scenarios.
+    """
+
+    kappa_min, kappa_max = connectivity_range
+    normalized_sets: dict[int, tuple[int, ...]] = {}
+    for kappa, nodes in sets_by_kappa.items():
+        if not kappa_min <= kappa <= kappa_max:
+            raise ValueError("kappa is outside the paper's connectivity range")
+
+        if kappa > maximum_paths:
+            raise ValueError("kappa cannot exceed N_l")
+
+        normalized_sets[int(kappa)] = tuple(nodes)
+
+    mapping = {
+        node: kappa
+        for kappa, nodes in normalized_sets.items()
+        for node in nodes
+    }
+    return ConnectivityPartition(
+        sensors=sensors,
+        sets_by_kappa=normalized_sets,
+        kappa_by_sensor=mapping,
+    )
+
+
+def build_seeded_connectivity_partition(
+    sensors             : tuple[int, ...],
+    connectivity_counts : tuple[int, int, int],
+    *,
+    random_seed         : int,
+    maximum_paths       : int = 5,
+) -> ConnectivityPartition:
+    """Randomly assign sensors to ``W_1``, ``W_2``, and ``W_3``.
+
+    Paper: Section IV-C states that sensors are assigned randomly to ``W_n``.
+    A fixed seed is an implementation addition for reproducibility.
+    """
+
+    if len(connectivity_counts) != 3 :
+        raise ValueError("connectivity_counts must contain |W_1|, |W_2|, |W_3|")
+
+    if any(count < 0 for count in connectivity_counts) :
+        raise ValueError("connectivity counts cannot be negative")
+
+    if sum(connectivity_counts) != len(sensors) :
+        raise ValueError("connectivity counts must cover all sensors")
+
+    generator           = np.random.default_rng(random_seed)
+    shuffled_sensors    = tuple(
+        int(node) for node in generator.permutation(np.asarray(sensors))
+    )
+    sets_by_kappa: dict[int, tuple[int, ...]] = {}
+    start                                     = 0
+    for kappa, count in enumerate(connectivity_counts, start=1):
+        stop = start + count
+        sets_by_kappa[kappa] = shuffled_sensors[start:stop]
+        start = stop
+
+    return build_explicit_connectivity_partition(
+        sensors,
+        sets_by_kappa,
+        connectivity_range=(1, 3),
+        maximum_paths=maximum_paths,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class InterferenceEnvironment:
+    """Sparse Eq. (26) interference indicators for every node and arc."""
+
+    network                     : NetworkEnvironment
+    range_multiplier            : float
+    interfering_arcs_by_node    : Mapping[int, tuple[DirectedArc, ...]]
+
+    def __post_init__(self) -> None :
+        if self.range_multiplier <= 0:
+            raise ValueError("range_multiplier must be positive")
+
+        normalized = {
+            int(node): tuple(arcs)
+            for node, arcs in self.interfering_arcs_by_node.items()
+        }
+
+        if set(normalized) != set(self.network.nodes) :
+            raise ValueError("interference mapping must contain every node in V")
+
+        valid_arcs = set(self.network.arcs)
+        for arcs in normalized.values():
+            if not set(arcs) <= valid_arcs:
+                raise ValueError("interference mapping contains an arc outside A")
+        object.__setattr__(
+            self,
+            "interfering_arcs_by_node",
+            MappingProxyType(normalized),
+        )
+
+    def indicator(self, node: int, arc: DirectedArc) -> int :
+        """Return ``I^i_jm`` from Eq. (26) as zero or one."""
+
+        if node not in self.interfering_arcs_by_node :
+            raise KeyError(f"node {node} is not in V")
+
+        if arc not in self.network.arcs :
+            raise KeyError(f"arc {arc} is not in A")
+
+        return int(arc in self.interfering_arcs_by_node[node])
+
+
+def build_interference_environment(
+    network          : NetworkEnvironment,
+    range_multiplier : float,
+) -> InterferenceEnvironment :
+    """Calculate ``I^i_jm=1`` iff ``gamma*d_jm>=d_ji``.
+
+    Paper: Section III-C, Eq. (26). Indicators are calculated for every
+    ``i in V`` and every directed communication link ``(j,m) in A``. Only
+    indicators equal to one are stored.
+    """
+
+    interfering_arcs_by_node = {
+        node : tuple(
+            (transmitter, receiver)
+            for transmitter, receiver in network.arcs
+            if range_multiplier * network.distances_m[transmitter, receiver]
+            >= network.distances_m[transmitter, node]
+        )
+        for node in network.nodes
+    }
+    return InterferenceEnvironment(
+        network=network,
+        range_multiplier=range_multiplier,
+        interfering_arcs_by_node=interfering_arcs_by_node,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentData :
+    """Complete solver-independent input for the paper MILP."""
+
+    experiment: ExperimentParameters
+    paper: PaperParameters
+    energy: AcousticEnergyEnvironment
+    connectivity: ConnectivityPartition
+    interference: InterferenceEnvironment
+
+    def __post_init__(self) -> None :
+        network = self.energy.network
+        if self.interference.network is not network: 
+            raise ValueError("energy and interference must use the same network")
+
+        if self.connectivity.sensors != network.sensors :
+            raise ValueError("connectivity partition must cover network sensors")
+
+        self.paper.validate_experiment(self.experiment)
+
+    @property
+    def network(self) -> NetworkEnvironment: 
+        """Return the underlying Section III-A network."""
+
+        return self.energy.network
+
+
+def build_environment(
+    experiment                  : ExperimentParameters,
+    *,
+    paper                       : PaperParameters | None = None,
+    explicit_connectivity_sets  : Mapping[int, tuple[int, ...]] | None = None,
+    two_dimensional             : bool = False,
+) -> EnvironmentData:
+    """Build all paper coefficients implemented through Stage 4."""
+
+    paper_parameters = paper or PaperParameters()
+    paper_parameters.validate_experiment(experiment)
+    network = build_paper_network_environment(
+        experiment,
+        power_levels=paper_parameters.power_levels,
+        two_dimensional=two_dimensional,
+    )
+    energy = build_acoustic_energy_environment(
+        network,
+        acoustic=paper_parameters.acoustic,
+        power_levels=paper_parameters.power_levels,
+    )
+
+    if explicit_connectivity_sets is None :
+        connectivity = build_seeded_connectivity_partition(
+            network.sensors,
+            experiment.connectivity_counts,
+            random_seed=experiment.random_seed,
+            maximum_paths=paper_parameters.network.maximum_paths,
+        )
+    else :
+        connectivity = build_explicit_connectivity_partition(
+            network.sensors,
+            explicit_connectivity_sets,
+            connectivity_range=paper_parameters.network.connectivity_range,
+            maximum_paths=paper_parameters.network.maximum_paths,
+        )
+        actual_counts = tuple(
+            len(connectivity.sets_by_kappa.get(kappa, ()))
+            for kappa in range(1, 4)
+        )
+        if actual_counts != experiment.connectivity_counts:
+            raise ValueError(
+                "explicit W_n cardinalities must match connectivity_counts"
+            )
+
+    interference = build_interference_environment(
+        network,
+        paper_parameters.network.interference_range_multiplier,
+    )
+    return EnvironmentData(
+        experiment=experiment,
+        paper=paper_parameters,
+        energy=energy,
+        connectivity=connectivity,
+        interference=interference,
     )

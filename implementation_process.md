@@ -273,3 +273,92 @@ Ruff and `git diff --check` reported no issues.
 - Confirm the documented 0.001 mJ/bit Table II comparison tolerance.
 - Stage 4 will add only `W_n`/`kappa_n` assignment and Eq. (26) interference
   preprocessing.
+
+### Stage 4 — Non-uniform connectivity and interference
+
+#### Scope and files
+
+- Added explicit and seeded construction of disjoint `W_n` subsets.
+- Added immutable `ConnectivityPartition` with both set and per-sensor views.
+- Added sparse Eq. (26) preprocessing through `InterferenceEnvironment`.
+- Added complete solver-independent `EnvironmentData` and `build_environment`.
+- Added 10 focused tests in `tests/test_connectivity_interference.py`.
+
+#### Paper sources
+
+- Section III-A: sensor subsets with subset-specific `kappa_n`.
+- Constraint (18) explanation and Tables III–IV: `W_n` membership/cardinality.
+- Section IV-C: random assignment of sensors to `W_n`.
+- Section III-C, Eq. (26): `I^i_jm=1` iff `gamma*d_jm>=d_ji`.
+
+#### Decisions
+
+- Explicit sets support exact Table III scenarios. Seeded cardinality assignment
+  supports the statistical configurations described in Section IV-C.
+- Empty `W_n` sets are retained, making tuples such as `(30,0,0)` explicit.
+- Eq. (26) is calculated literally for every node and directed arc. Only true
+  indicators are stored, but a method exposes zero/one lookup.
+- Literal Eq. (26) evaluation includes the transmitter (`i=j`) because
+  `d_jj=0`. Stage 10 will define Constraint (22)'s interference summation
+  domain without changing the precomputed equation.
+- Explicit set cardinalities must match `ExperimentParameters`; inconsistent
+  experiment descriptions fail before model construction.
+
+#### Ambiguities and differences
+
+- Section IV-C states that set membership is random but does not report the
+  random seed. A seeded NumPy permutation provides reproducibility.
+- The notation `A\\{i}` in Constraint (22) is not resolved in Stage 4. Eq. (26)
+  coefficients remain complete so that decision can be reviewed with Stage 10.
+
+#### Verification
+
+Tests cover partition disjointness/coverage, invalid `kappa`, deterministic
+random assignment, Eq. (26) true/false branches, transmitter behavior, sparse
+storage, explicit configuration assembly, and cardinality mismatch rejection.
+
+### Stage 5 — MILP variables, domains, and objective
+
+#### Scope and files
+
+- Added PuLP and open-source HiGHS to `pyproject.toml` and the local environment.
+- Added `src/kcon_uwsn/model.py`.
+- Defined `f`, `g`, `h`, `p`, and `epsilon` with typed immutable index maps.
+- Added Objective (6) and domains from Constraints (23)–(25).
+- Added 8 structural tests in `tests/test_model_stage_5.py`.
+
+#### Paper sources
+
+- Section III-C: decision-variable definitions.
+- Objective (6): minimize `epsilon`.
+- Constraints (23)–(25): integer and binary domains.
+
+#### Decisions
+
+- Path indices are one-based to match `l in {1,...,N_l}`; nodes remain
+  zero-based under the documented environment convention.
+- `epsilon` is a non-negative continuous variable. The paper defines it as
+  energy and does not require integrality.
+- Variable names include every mathematical index for readable LP exports.
+- The current PuLP 3.3 `problem.add_variable` API is used instead of deprecated
+  direct `LpVariable` construction.
+- PuLP registers variables lazily when expressions reference them. Before
+  Stage 6 constraints, `ModelVars` is the authoritative declaration/index map;
+  only `epsilon` appears in the current problem expression.
+- Solver options remain outside `model.py`; importing `highspy` confirms the
+  future `pulp.HiGHS` backend is available.
+
+#### Verification
+
+Focused tests verify exact index counts, path/node conventions, every variable
+domain, Objective (6), absence of premature constraints, immutable index maps,
+and HiGHS availability. The full suite reports 62 passing tests; Ruff and
+`git diff --check` report no issues. No optimization solve is expected at this
+stage.
+
+#### Review before Stage 6
+
+- Confirm literal Eq. (26) preprocessing, including the transmitter.
+- Confirm the explicit/seeded `W_n` APIs.
+- Confirm one-based path indices inside otherwise zero-based code.
+- Stage 6 will add only Constraints (7)–(12), one named helper per equation.

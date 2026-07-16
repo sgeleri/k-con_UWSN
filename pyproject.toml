@@ -9,8 +9,10 @@ description = "Paper-traceable implementation of non-uniform k-connectivity for 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "highspy",
     "matplotlib",
     "numpy",
+    "pulp",
 ]
 
 [project.optional-dependencies]

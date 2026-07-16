@@ -80,6 +80,31 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Tests: per-arc power selection, Eq. (4) reception cost, and immutable
     coefficient mapping.
 
+## Stage 4 — Connectivity and interference
+
+- `ConnectivityPartition`, `build_explicit_connectivity_partition`, and
+  `build_seeded_connectivity_partition`
+  - Source: Section III-A, Constraint (18), Tables III–IV, and Section IV-C.
+  - Symbols: `W_n`, `kappa_n`, and `S_P`.
+  - Tests: explicit partition, disjointness/coverage, reproducibility, and
+    cardinality tests in `test_connectivity_interference.py`.
+- `InterferenceEnvironment` and `build_interference_environment`
+  - Source: Section III-C, Eq. (26).
+  - Symbol: `I^i_jm`.
+  - Tests: exact true/false branches and sparse all-node mapping tests.
+- `EnvironmentData` and `build_environment`
+  - Source: Sections III-A–III-C through Eq. (26).
+  - Test: complete explicit Table III-style environment construction.
+
+## Stage 5 — MILP variables, domains, and objective
+
+- `ModelVars` and `build_model`
+  - Source: Section III-C variable definitions, Objective (6), and Constraints
+    (23)–(25).
+  - Symbols: `f^kl_ij`, `g^kl_ij`, `h^kl_ij`, `p^l_k`, and `epsilon`.
+  - Tests: index counts, one-based path indices, variable domains, immutable
+    maps, and objective structure in `test_model_stage_5.py`.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -106,3 +131,15 @@ separately. The matrix is updated after each reviewed implementation stage.
   altering the published equations.
 - Per-arc transmission energies are stored as an immutable mapping keyed by
   exactly the directed arc set `A`; all MILP-facing energies use J/bit.
+- Cardinality-based `W_n` assignment uses a seeded NumPy permutation because
+  Section IV-C specifies random assignment but does not publish seeds.
+- Eq. (26) is evaluated literally for every `i in V` and `(j,m) in A`.
+  Consequently, the indicator is also one at transmitter `i=j`; the later
+  Constraint (22) implementation will separately define its summation domain.
+- Only true Eq. (26) indicators are stored, grouped by node, while
+  `InterferenceEnvironment.indicator` provides the complete zero/one view.
+- PuLP variables use one-based path indices to match the paper while retaining
+  zero-based node indices from the environment.
+- PuLP 3.3's current `problem.add_variable` API is used. Variables not yet used
+  by an objective or constraint are exposed through `ModelVars` and are
+  registered by PuLP lazily as later constraint stages reference them.
