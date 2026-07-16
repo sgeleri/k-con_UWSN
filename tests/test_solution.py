@@ -47,6 +47,26 @@ def test_unsolved_problem_returns_status_without_values() -> None:
     assert solution.paths == {}
 
 
+def test_relaxation_values_without_integer_incumbent_are_not_extracted() -> None:
+    """Regression: CBC may populate relaxation values after no feasible MIP."""
+
+    experiment = ExperimentParameters(
+        number_of_sensors=2,
+        volume_km=(0.1, 0.1, 0.1),
+        connectivity_counts=(2, 0, 0),
+    )
+    environment = build_environment(experiment, two_dimensional=True)
+    problem, variables = build_model(environment)
+    variables.maximum_sensor_energy.varValue = 123.0
+    problem.status = pulp.LpStatusNotSolved
+    problem.sol_status = pulp.LpSolutionNoSolutionFound
+
+    solution = extract_solution(problem, variables, environment)
+
+    assert not solution.has_incumbent
+    assert solution.objective_energy_j is None
+
+
 def test_solution_exposes_status_objective_and_sparse_values(
     solved_case: tuple[EnvironmentData, ModelVars, Solution],
 ) -> None:

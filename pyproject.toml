@@ -15,6 +15,9 @@ dependencies = [
     "pulp",
 ]
 
+[project.scripts]
+kcon-uwsn = "kcon_uwsn.run:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",

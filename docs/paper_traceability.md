@@ -175,6 +175,35 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Source: Constraint (22) and Eq. (26), with the documented `A\\{i}`
     interpretation.
 
+## Stage 12 — Runner
+
+- `solve_experiment`
+  - Source flow: build Sections III-A/B environment, build Section III-C MILP,
+    solve, and extract Stage 11 diagnostics.
+  - Solver: PuLP HiGHS by default; open-source CBC is selectable as a fallback.
+- `scenario_i_experiment`
+  - Source: Section IV-B and Table III Scenario-I.
+  - Values: 12 sensors, 1×1 km 2D cross section, `xi=1`,
+    `(|W_1|,|W_2|,|W_3|)=(12,0,0)`.
+- CLI
+  - Inputs: deployment, connectivity cardinalities, `xi`, seed, solver,
+    time limit, relative MIP gap, and threads.
+  - Tests: complete small solve, invalid options, Scenario-I configuration,
+    and CLI output in `test_runner_plotting.py`.
+
+## Stage 13 — Fig. 3(a) and Fig. 3(b)
+
+- `plot_network_topology`
+  - Source: Section IV-B, Fig. 3(a).
+  - Output semantics: 12 labeled sensors, corner BS star, equal 1×1 km axes.
+- `plot_scenario_i`
+  - Source: Section IV-B, Fig. 3(b), and Table III Scenario-I.
+  - Output semantics: aggregate data-flow links, sensor energy colors,
+    bottleneck paths, and `epsilon`.
+- `save_figure_3_outputs`
+  - Outputs: separate panels, combined panel, and deterministic JSON metadata.
+  - Tests: artifact/data checks and deterministic topology-image hash.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -228,3 +257,12 @@ separately. The matrix is updated after each reviewed implementation stage.
   cycles, or contains disconnected components.
 - Energy and airtime diagnostics are recomputed independently from extracted
   values rather than copied from constraint slacks.
+- The normal runner retains Table I `N_l=5`. The Fig. 3 workflow uses `N_l=2`
+  as an explicit open-source-solver tractability setting; the paper's
+  Scenario-I illustration itself shows no source requiring more than two active
+  paths. This deviation is written into the generated metadata.
+- Figure output is a methodological reproduction because the paper does not
+  publish its 12 sensor coordinates or seed.
+- HiGHS remains the default solver. CBC is exposed as an open-source fallback,
+  but it did not find a 12-sensor integer incumbent within the tested
+  120-second limit.

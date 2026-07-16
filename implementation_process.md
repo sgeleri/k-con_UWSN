@@ -533,3 +533,99 @@ changed locally if stronger source evidence is found.
   without an incumbent.
 - Stage 12 will add CLI orchestration and solver options without altering the
   environment, formulation, or extraction calculations.
+
+### Stage 12 — Runner
+
+#### Scope and files
+
+- Added `src/kcon_uwsn/run.py` with `solve_experiment`, `RunResult`, CLI
+  argument parsing, summary reporting, and a Scenario-I workflow.
+- Added the `kcon-uwsn` console script in `pyproject.toml`.
+- Exposed deployment dimensions, partition counts, `xi`, seed, dimensionality,
+  time limit, MIP gap, thread count, and solver selection.
+- Retained HiGHS as the default and exposed bundled open-source CBC as a
+  fallback.
+
+#### Decisions
+
+- `model.py` remains free of solver options; orchestration owns all HiGHS/CBC
+  settings.
+- Normal CLI defaults use a small four-sensor deployment. Paper-scale work
+  requires the explicit `--figure-3` mode.
+- Invalid time limits, gaps, thread counts, and solver names fail before model
+  construction.
+- A no-incumbent solve returns exit code 2 after printing status, rather than
+  attempting to plot undefined values.
+- Thread count defaults to the solver's existing process-global setting.
+  Forcing a different count after an earlier HiGHS solve can return `Not
+  Solved`; users may still set `--threads` in a fresh process.
+
+#### Verification
+
+- The wrapper completes environment → model → HiGHS → solution on a small
+  deterministic case.
+- CLI output reports status, wall time, `epsilon` in kJ, active path counts,
+  and maximum energy/airtime residuals.
+- Runner tests cover valid solves and invalid solver settings.
+- Final verification reports 86 passing tests; Ruff, IDE diagnostics, and
+  `git diff --check` report no issues.
+
+### Stage 13 — Fig. 3(a) and Fig. 3(b)
+
+#### Scope and files
+
+- Added `src/kcon_uwsn/plotting.py`.
+- Implemented topology and Scenario-I panel renderers.
+- Added separate/combined PNG output and deterministic JSON metadata.
+- Added data-level and deterministic-image tests in
+  `tests/test_runner_plotting.py`.
+- Generated final artifacts under `results/`:
+  - `figure_3a_network_topology.png`
+  - `figure_3b_scenario_i.png`
+  - `figure_3ab_scenario_i.png`
+  - `figure_3ab_metadata.json`
+
+#### Paper sources and visual semantics
+
+- Section IV-B and Fig. 3(a): 12 labeled sensors, BS at `(-0.5,0)`, equal
+  1×1 km axes.
+- Table III Scenario-I: all 12 sensors in `W_1` with `kappa_1=1`.
+- Fig. 3(b): aggregate flow links, per-sensor energy colors, bottleneck source
+  paths, and `epsilon`.
+
+#### Reproducibility and tractability decisions
+
+- Seed 42 fixes the generated topology. The paper's coordinates and seed are
+  unavailable, so the images reproduce methodology and visual semantics rather
+  than exact geometry.
+- The default paper model continues to use Table I `N_l=5`.
+- The figure workflow explicitly uses `N_l=2`. The paper's Scenario-I panel
+  shows at most two active paths for the highlighted source, and reducing the
+  path slots makes the open-source solve tractable. This deviation is embedded
+  in `figure_3ab_metadata.json`.
+- HiGHS found a feasible full-`N_l=5` incumbent near 23.774 kJ, but its Python
+  binding aborted while returning the large model inside Cursor's sandbox.
+  CBC returned cleanly but found no integer incumbent within 120 seconds.
+  Running the `N_l=2` HiGHS workflow outside that sandbox completed normally.
+- The no-incumbent discovery exposed a bug: CBC populated LP-relaxation
+  variable values despite reporting no integer solution. Extraction now checks
+  PuLP's incumbent status (`sol_status`) before reading any values.
+
+#### Generated result
+
+The documented figure command completed with:
+
+- Status: Optimal under the configured 15% relative-gap criterion.
+- Wall time: 6.673 s.
+- `epsilon`: 23.771310 kJ.
+- Nodes 1–10 used one active path; nodes 11–12 used two.
+- Maximum energy and airtime violations: zero.
+
+The generated metadata records positions, seed, connectivity, objective,
+active-path counts, `N_l=2`, and both reproduction/deviation notes.
+
+#### Review before Stage 14
+
+- Confirm the visual encoding and explicit `N_l=2` figure-workflow deviation.
+- Stage 14 should audit all paper references and reproducibility commands; it
+  should not silently promote this figure setting to the default MILP.

@@ -251,7 +251,11 @@ def extract_solution(
 
     if tolerance <= 0:
         raise ValueError("tolerance must be positive")
-    if pulp.value(variables.maximum_sensor_energy) is None:
+    incumbent_statuses = {
+        pulp.LpSolutionOptimal,
+        pulp.LpSolutionIntegerFeasible,
+    }
+    if problem.sol_status not in incumbent_statuses:
         return _status_only_solution(problem)
 
     objective = _value(variables.maximum_sensor_energy)
