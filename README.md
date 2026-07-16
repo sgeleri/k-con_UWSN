@@ -14,10 +14,10 @@ to paper sections, equations, tables, and figures.
 
 ## Current scope
 
-Stages 0–5 provide paper parameters, network/acoustic/interference preprocessing,
-non-uniform connectivity partitions, and the PuLP variables/objective. Routing,
-resource constraints, the runner, and figure generation follow in later
-reviewed stages.
+Stages 0–10 provide paper parameters, complete environment preprocessing, and
+the PuLP formulation through Constraints (7)–(25), including routing,
+disjointness, control traffic, energy, bandwidth, and interference. Solution
+extraction, the runner, and figure generation follow in later reviewed stages.
 
 ## Development setup
 

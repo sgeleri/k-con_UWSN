@@ -362,3 +362,115 @@ stage.
 - Confirm the explicit/seeded `W_n` APIs.
 - Confirm one-based path indices inside otherwise zero-based code.
 - Stage 6 will add only Constraints (7)–(12), one named helper per equation.
+
+### Stage 6 — Flow construction constraints
+
+#### Scope
+
+- Implemented Constraints (7)–(12), which are required foundations for the
+  requested Stages 7–10.
+- Added one equation-numbered helper per logical constraint group.
+- Added deterministic names such as `c07_flow_i0_k1_l1`.
+
+#### Paper sources and decisions
+
+- Constraint (7): source emits `p^l_k`, BS absorbs it, and relays balance flow.
+- Constraint (8): each source generates `s_k*N_r` packets.
+- Constraint (9): incoming source flow is summed only from `j in W`, matching
+  the printed domain.
+- Constraints (10)–(11): `f` and `h` are coupled using `s_k*N_r`.
+- Constraint (12): outgoing use is at most one per node/source/path; the paper
+  applies this to sensor nodes `W`, not the BS.
+
+#### Verification
+
+A solved fixed topology is optimal, each source delivers 1440 packets, and
+every Constraint (7) residual is zero within numerical tolerance.
+
+### Stage 7 — Path structure and disjointness
+
+#### Scope and paper sources
+
+- Constraint (13): each directed link is used by at most one path per source.
+- Constraint (14): BS ingress flow is non-increasing with path index.
+- Constraints (15)–(16): used-link flow equals `p^l_k`; unused links receive
+  the paper's big-M relaxation.
+- Constraints (19)–(20): each non-source sensor is an incoming/outgoing relay
+  on at most one path of a source.
+
+#### Decisions and verification
+
+- `M=10,000` is read from Table I through `NetworkParameters`.
+- A complete three-node topology with `kappa=2` solves optimally and produces
+  at least two separate path starts for every sensor. Extracted relay usage
+  confirms no relay appears on multiple paths for the same source.
+
+### Stage 8 — Control traffic and non-uniform connectivity
+
+#### Scope and paper sources
+
+- Implemented Constraint (17) exactly as
+  `g^kl_ij=xi*N_r*(h^kl_ij+h^kl_ji)`.
+- Implemented Constraint (18) using the Stage 4 per-sensor `kappa` mapping.
+
+#### Decisions and verification
+
+- The graph generated in Stage 2 is symmetric, so Constraint (17) requires and
+  validates the presence of every reverse arc.
+- Model construction rejects nonintegral `xi*N_r` because Constraint (23)
+  declares `g` integer.
+- Solved values of every `g` variable match the Eq. (17) expression.
+- Uniform `kappa=1` and `kappa=2` test environments solve optimally.
+
+### Stage 9 — Per-node energy constraint
+
+#### Scope and paper source
+
+- Implemented Constraint (21) for every sensor `i in W`.
+- Included transmitted and received data/control bits for self-generated and
+  relayed traffic.
+- Bounded each sensor expression by the common `epsilon` variable.
+
+#### Decisions and verification
+
+- The BS is excluded from Constraint (21), matching its `i in W` domain.
+- Transmit energy uses the per-arc `E*_T,ij`; reception uses constant `E_R`.
+- Tests inspect PuLP coefficients directly for outgoing data/control,
+  incoming data, and the `-epsilon` term.
+
+### Stage 10 — Bandwidth and interference constraint
+
+#### Scope and paper source
+
+- Implemented Constraint (22) for every `i in V`.
+- Added own transmission, own reception, and Eq. (26)-selected blocked airtime.
+- Used the Table I values `R_b`, `N_r`, and `t_r`.
+
+#### Interpretation decision
+
+The paper prints the interference-link domain as `A\\{i}` without formally
+defining subtraction of a node from an arc set. It also describes this term as
+bandwidth lost to neighboring transmissions, while own transmission and
+reception already appear in the first two terms. The implementation therefore
+interprets `A\\{i}` as arcs with neither endpoint equal to `i`. This avoids
+double-counting incident traffic. The complete literal Eq. (26) indicators
+remain available in `InterferenceEnvironment`, so this interpretation can be
+changed locally if stronger source evidence is found.
+
+#### Verification
+
+- Tests inspect separate coefficients for own transmission, own reception, and
+  one nonincident interfering arc.
+- An incident arc marked true by literal Eq. (26) is charged once as own
+  traffic, not again as interference.
+- The complete two-sensor regression model contains 385 named constraints.
+- Fixed `kappa=1` and `kappa=2` instances solve optimally with HiGHS.
+- Full verification reports 69 passing tests; Ruff, IDE diagnostics, and
+  `git diff --check` report no issues.
+
+#### Review before Stage 11
+
+- Confirm the `A\\{i}` nonincident-arc interpretation for Constraint (22).
+- Confirm control traffic should continue requiring symmetric directed arcs.
+- Stage 11 will extract paths, objective, node energy, and airtime diagnostics
+  without changing the mathematical formulation.

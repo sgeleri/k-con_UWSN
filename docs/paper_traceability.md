@@ -105,6 +105,61 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Tests: index counts, one-based path indices, variable domains, immutable
     maps, and objective structure in `test_model_stage_5.py`.
 
+## Stage 6 — Flow construction
+
+- `_add_constraint_07_flow_conservation`
+  - Source: Section III-C, Constraint (7).
+  - Test: solved source/BS/relay residual checks.
+- `_add_constraint_08_generated_packets`
+  - Source: Section III-C, Constraint (8).
+  - Test: each source delivers `s_k*N_r=1440` packets.
+- `_add_constraint_09_no_source_reentry`
+  - Source: Section III-C, Constraint (9).
+- `_add_constraints_10_11_flow_use_coupling`
+  - Source: Section III-C, Constraints (10)–(11).
+- `_add_constraint_12_single_next_hop`
+  - Source: Section III-C, Constraint (12).
+
+## Stage 7 — Path structure and disjointness
+
+- `_add_constraint_13_link_disjointness`
+  - Source: Section III-C, Constraint (13).
+- `_add_constraint_14_monotone_path_index`
+  - Source: Section III-C, Constraint (14).
+- `_add_constraints_15_16_phantom_flow`
+  - Source: Section III-C, Constraints (15)–(16).
+- `_add_constraints_19_20_node_disjointness`
+  - Source: Section III-C, Constraints (19)–(20).
+- Tests: a solved `kappa=2` topology verifies separate path starts and that
+  each relay is used by at most one path.
+
+## Stage 8 — Control traffic and non-uniform connectivity
+
+- `_add_constraint_17_control_flow`
+  - Source: Section III-C, Constraint (17).
+  - Test: every solved `g^kl_ij` equals
+    `xi*N_r*(h^kl_ij+h^kl_ji)`.
+- `_add_constraint_18_non_uniform_connectivity`
+  - Source: Section III-C, Constraint (18).
+  - Tests: uniform `kappa=1` and `kappa=2` solved topologies.
+
+## Stage 9 — Per-node energy
+
+- `_add_constraint_21_energy`
+  - Source: Section III-C, Constraint (21).
+  - Test: transmission/reception data and control coefficients are checked
+    directly against `E*_T,ij`, `E_R`, `l_d`, and `l_c`.
+
+## Stage 10 — Bandwidth and interference
+
+- `_add_constraint_22_bandwidth`
+  - Source: Section III-C, Constraint (22), using Eq. (26).
+  - Test: own transmission, own reception, and nonincident interfering-link
+    coefficients are checked independently.
+- Full formulation regression
+  - Test: the two-sensor complete graph has 385 named constraints and solves
+    optimally with HiGHS.
+
 ## Implementation-specific decisions
 
 - Code stores transmission energy in J/bit. Table II reference values are
@@ -143,3 +198,10 @@ separately. The matrix is updated after each reviewed implementation stage.
 - PuLP 3.3's current `problem.add_variable` API is used. Variables not yet used
   by an objective or constraint are exposed through `ModelVars` and are
   registered by PuLP lazily as later constraint stages reference them.
+- Every constraint name begins with its paper equation number (`c07` through
+  `c22`) to support LP inspection and equation-level diagnostics.
+- Constraint (17) checks that `xi*N_r` is integral because `g` is declared
+  integer in Constraint (23).
+- Constraint (22)'s printed `A\\{i}` domain is interpreted as arcs not incident
+  to node `i`. Own incident arcs are already charged by the transmission and
+  reception terms, so this prevents duplicate airtime accounting.

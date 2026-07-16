@@ -33,9 +33,9 @@ def test_variable_index_counts_match_section_iii_c(
     assert len(variables.control_flow) == number_of_flow_keys
     assert len(variables.arc_used) == number_of_flow_keys
     assert len(variables.path_packets) == number_of_path_keys
-    # PuLP 3.3 registers variables lazily when objective/constraint expressions
-    # use them. At Stage 5 only epsilon appears in an expression.
-    assert len(problem.variables()) == 1
+    assert len(problem.variables()) == (
+        3 * number_of_flow_keys + number_of_path_keys + 1
+    )
 
 
 def test_flow_keys_use_one_based_path_and_zero_based_node_indices(
@@ -105,7 +105,6 @@ def test_epsilon_and_objective_match_equation_6(
     assert epsilon.lowBound == 0
     assert problem.sense == pulp.LpMinimize
     assert problem.objective.get(epsilon) == 1
-    assert problem.numConstraints() == 0
 
 
 def test_variable_mappings_are_immutable(
