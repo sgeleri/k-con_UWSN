@@ -579,11 +579,8 @@ changed locally if stronger source evidence is found.
 - Added separate/combined PNG output and deterministic JSON metadata.
 - Added data-level and deterministic-image tests in
   `tests/test_runner_plotting.py`.
-- Generated final artifacts under `results/`:
-  - `figure_3a_network_topology.png`
-  - `figure_3b_scenario_i.png`
-  - `figure_3ab_scenario_i.png`
-  - `figure_3ab_metadata.json`
+- Generated tractable approximation artifacts under `results/`; Stage 14 later
+  renamed them with an `approximate_` prefix to prevent a paper-fidelity claim.
 
 #### Paper sources and visual semantics
 
@@ -599,10 +596,9 @@ changed locally if stronger source evidence is found.
   unavailable, so the images reproduce methodology and visual semantics rather
   than exact geometry.
 - The default paper model continues to use Table I `N_l=5`.
-- The figure workflow explicitly uses `N_l=2`. The paper's Scenario-I panel
-  shows at most two active paths for the highlighted source, and reducing the
-  path slots makes the open-source solve tractable. This deviation is embedded
-  in `figure_3ab_metadata.json`.
+- The initial figure workflow used `N_l=2` to make the open-source solve
+  tractable. Stage 14 determined that this changes the feasible region and
+  therefore separated it from the paper-model `N_l=5` workflow.
 - HiGHS found a feasible full-`N_l=5` incumbent near 23.774 kJ, but its Python
   binding aborted while returning the large model inside Cursor's sandbox.
   CBC returned cleanly but found no integer incumbent within 120 seconds.
@@ -613,7 +609,7 @@ changed locally if stronger source evidence is found.
 
 #### Generated result
 
-The documented figure command completed with:
+The initial approximate figure command completed with:
 
 - Status: Optimal under the configured 15% relative-gap criterion.
 - Wall time: 6.673 s.
@@ -622,10 +618,77 @@ The documented figure command completed with:
 - Maximum energy and airtime violations: zero.
 
 The generated metadata records positions, seed, connectivity, objective,
-active-path counts, `N_l=2`, and both reproduction/deviation notes.
+active-path counts, `N_l=2`, and both reproduction/deviation notes. Stage 14
+expanded this record and explicitly labeled the artifacts as approximate.
 
 #### Review before Stage 14
 
 - Confirm the visual encoding and explicit `N_l=2` figure-workflow deviation.
 - Stage 14 should audit all paper references and reproducibility commands; it
   should not silently promote this figure setting to the default MILP.
+
+### Stage 14 — Fidelity and reproducibility audit
+
+#### Audit outcome
+
+- Two independent reviews covered equation/model fidelity and
+  tests/reproducibility.
+- Every numbered equation (1)–(26) is represented, and no direct transcription
+  error was found in Eqs. (1)–(21) or (23)–(26).
+- Constraint (22)'s `A\{i}` notation remains interpretation-dependent. The
+  selected nonincident-arc interpretation is supported by the prose but is
+  recorded as unresolved pending author clarification or sensitivity analysis.
+
+#### Corrective changes
+
+- Separated solver termination, solution status, best bound, and achieved gap.
+  Gap-limited incumbents are no longer presented as exact global optima.
+- Added distinct CLI exit codes for optimal, no-incumbent, and feasible but
+  unproven outcomes.
+- Rejected fractional or constraint-invalid solver values before extraction.
+- Changed path extraction to retain formulation-permitted disconnected cycles
+  as `extraneous_arcs` instead of crashing on a valid incumbent.
+- Split figure generation into a paper-model `--figure-3` workflow using Table
+  I `N_l=5` and an explicitly labeled `--approximate-figure-3` workflow using
+  `N_l=2` and a 15% requested gap.
+- Removed the unsupported inference that the paper's figure proves two path
+  slots are sufficient for every source.
+- Updated Fig. 3(b)-style rendering to show faint individual flows and a
+  separate bottleneck-incident aggregate relay overlay.
+- Derived an independent seeded stream for random `W_n` assignment instead of
+  restarting the deployment RNG sequence.
+- Added strict paper-scale output validation, complete run/software metadata,
+  artifact hashes, a Python dependency lock, and canonical approximate output
+  files.
+- Applied Ruff formatting to the repository and documented lint/format gates.
+
+#### Scope and remaining limitations
+
+- The versioned figures are explicitly approximate because the tractable
+  workflow changes `N_l` and accepts a nonzero MIP gap.
+- The paper-model `N_l=5` workflow is available but is not claimed to complete
+  within the default open-source-solver time limit.
+- Exact Fig. 3 coordinates and random seed are unpublished, so neither workflow
+  can reproduce the paper's reported `epsilon=10.40 kJ` on the original
+  topology.
+- Table III Scenarios II–VII, Table IV configurations and 20-topology
+  averaging, Fig. 3(c)–(i), and survival analysis remain outside v1.
+
+#### Verification
+
+- Regular suite: 94 tests passed and one opt-in paper-scale test skipped.
+- The full 12-sensor approximate workflow test passed separately.
+- Ruff lint, Ruff format check, whitespace check, dependency check, CLI loading,
+  and IDE diagnostics passed.
+- Canonical approximate run: Python 3.13.10, NumPy 2.5.1, Matplotlib 3.11.0,
+  PuLP 3.3.2, HiGHS 1.15.1, one thread, seed 42, `N_l=2`, 15% requested gap,
+  11.3998% achieved gap, and `epsilon=23.771310 kJ`.
+- Canonical SHA-256 values:
+  - `approximate_figure_3a_topology.png`:
+    `a0e92eb7891b235d80f45cc72e7fe64fbe4b3c8bc2fa2fed285e18d6f18ff919`
+  - `approximate_figure_3b_scenario_i.png`:
+    `8ce7f131db5d288a2e500e8448df33a558c021511691c61a1f329d300e48286c`
+  - `approximate_figure_3ab_scenario_i.png`:
+    `faa6f772d59aa7320138c9044a304d00b1c3eef679b00be154cf128b548ad10c`
+  - `approximate_figure_3ab_metadata.json`:
+    `5715115b50adf280443876592b2ec13708a70248dfa17480cf6578910e39e18c`

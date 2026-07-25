@@ -26,7 +26,8 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Tests: `test_power_levels_match_table_ii` and
     `test_table_ii_energy_is_converted_to_joules_per_bit`.
 - `ExperimentParameters`
-  - Source: Section III-A, Fig. 1, Table I, and Tables III–IV.
+  - Source: Section III-A, Fig. 1, Table I, and the cardinality convention used
+    by Tables III–IV.
   - Symbols: `(d_x, d_y, d_z)`, `|W|`, `ξ`, and
     `(|W_1|, |W_2|, |W_3|)`.
   - Tests: `test_default_experiment_matches_figure_1_scale` and partition
@@ -198,11 +199,15 @@ separately. The matrix is updated after each reviewed implementation stage.
   - Output semantics: 12 labeled sensors, corner BS star, equal 1×1 km axes.
 - `plot_scenario_i`
   - Source: Section IV-B, Fig. 3(b), and Table III Scenario-I.
-  - Output semantics: aggregate data-flow links, sensor energy colors,
-    bottleneck paths, and `epsilon`.
+  - Output semantics: faint individual data flows, aggregate relay traffic
+    incident to the bottleneck, sensor energy colors, bottleneck paths, and
+    `epsilon`.
 - `save_figure_3_outputs`
-  - Outputs: separate panels, combined panel, and deterministic JSON metadata.
-  - Tests: artifact/data checks and deterministic topology-image hash.
+  - Requires the paper's Table I `N_l=5`.
+- `save_approximate_figure_3_outputs`
+  - Produces explicitly named `N_l=2` approximation artifacts.
+  - Tests: generic artifact/data checks, deterministic topology-image hash,
+    and an opt-in full approximate-workflow integration test.
 
 ## Implementation-specific decisions
 
@@ -247,22 +252,26 @@ separately. The matrix is updated after each reviewed implementation stage.
 - Constraint (17) checks that `xi*N_r` is integral because `g` is declared
   integer in Constraint (23).
 - Constraint (22)'s printed `A\\{i}` domain is interpreted as arcs not incident
-  to node `i`. Own incident arcs are already charged by the transmission and
-  reception terms, so this prevents duplicate airtime accounting.
+  to node `i`. The paper's prose about neighboring transmissions supports this
+  choice, but the notation is not formally defined; author confirmation or a
+  sensitivity analysis remains necessary.
 - Solution extraction returns a status-only object when no incumbent exists,
   allowing the later runner to report unsolved/infeasible models without
   reading undefined PuLP values.
-- Only nonzero decision values are retained. Active arcs are ordered from each
-  source to the BS and extraction fails loudly if a solved arc set branches,
-  cycles, or contains disconnected components.
+- Only nonzero decision values are retained. Extraction follows the
+  source-to-BS component and reports formulation-permitted disconnected or
+  cyclic arcs separately as `extraneous_arcs`.
 - Energy and airtime diagnostics are recomputed independently from extracted
   values rather than copied from constraint slacks.
-- The normal runner retains Table I `N_l=5`. The Fig. 3 workflow uses `N_l=2`
-  as an explicit open-source-solver tractability setting; the paper's
-  Scenario-I illustration itself shows no source requiring more than two active
-  paths. This deviation is written into the generated metadata.
+- The paper-model Fig. 3 workflow retains Table I `N_l=5`. A separate
+  `--approximate-figure-3` workflow uses `N_l=2` and a 15% requested gap for
+  open-source-solver tractability; filenames, plot text, and metadata label
+  this deviation explicitly.
 - Figure output is a methodological reproduction because the paper does not
   publish its 12 sensor coordinates or seed.
 - HiGHS remains the default solver. CBC is exposed as an open-source fallback,
   but it did not find a 12-sensor integer incumbent within the tested
   120-second limit.
+- Table III Scenarios II–VII, Table IV's eleven configurations, 20-topology
+  averaging, and the paper's published scenario values are outside the current
+  implementation scope.
