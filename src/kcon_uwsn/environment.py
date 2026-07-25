@@ -1,4 +1,5 @@
-"""Network environment for the Tantur et al. (2025) UWSN model.
+"""
+Network environment for the Tantur et al. (2025) UWSN model.
 
 This stage implements only deployment geometry and graph construction from
 Section III-A. Acoustic energy and interference coefficients are added in
