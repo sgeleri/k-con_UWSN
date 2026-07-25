@@ -31,6 +31,9 @@ where = ["src"]
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "slow: opt-in paper-scale integration tests",
+]
 
 [tool.ruff]
 line-length = 88

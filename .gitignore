@@ -7,8 +7,12 @@ __pycache__/
 dist/
 build/
 
-# Generated solver and figure artifacts
-results/
+# Generated solver artifacts and non-canonical figure outputs
+results/*
+!results/approximate_figure_3a_topology.png
+!results/approximate_figure_3b_scenario_i.png
+!results/approximate_figure_3ab_scenario_i.png
+!results/approximate_figure_3ab_metadata.json
 *.lp
 *.mps
 *.sol
