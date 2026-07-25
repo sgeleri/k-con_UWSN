@@ -121,8 +121,7 @@ def test_flow_conservation_and_generation_constraints_solve(
     )
     for source in environment.network.sensors:
         assert sum(
-            pulp.value(variables.path_packets[(source, path)])
-            for path in range(1, 6)
+            pulp.value(variables.path_packets[(source, path)]) for path in range(1, 6)
         ) == pytest.approx(generated)
         for path in range(1, 6):
             for node in environment.network.nodes:
@@ -154,11 +153,12 @@ def test_kappa_two_produces_two_node_disjoint_paths() -> None:
         relay_usage: dict[int, set[int]] = {}
         for path in range(1, 6):
             for transmitter, receiver in environment.network.arcs:
-                if pulp.value(
-                    variables.arc_used[
-                        (source, path, transmitter, receiver)
-                    ]
-                ) <= 0.5:
+                if (
+                    pulp.value(
+                        variables.arc_used[(source, path, transmitter, receiver)]
+                    )
+                    <= 0.5
+                ):
                     continue
                 for node in (transmitter, receiver):
                     if node not in (source, environment.network.bs_index):

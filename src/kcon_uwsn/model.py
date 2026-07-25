@@ -15,19 +15,19 @@ PathKey = tuple[int, int]
 
 
 @dataclass(frozen=True, slots=True)
-class ModelVars :
+class ModelVars:
     """Typed handles for all decision variables defined in Section III-C."""
 
     # Keys are (source k, path l, transmitter i, receiver j).
-    data_flow       : Mapping[FlowKey, pulp.LpVariable]
-    control_flow    : Mapping[FlowKey, pulp.LpVariable]
-    arc_used        : Mapping[FlowKey, pulp.LpVariable]
+    data_flow: Mapping[FlowKey, pulp.LpVariable]
+    control_flow: Mapping[FlowKey, pulp.LpVariable]
+    arc_used: Mapping[FlowKey, pulp.LpVariable]
 
     # Keys are (source k, path l).
-    path_packets            : Mapping[PathKey, pulp.LpVariable]
-    maximum_sensor_energy   : pulp.LpVariable
+    path_packets: Mapping[PathKey, pulp.LpVariable]
+    maximum_sensor_energy: pulp.LpVariable
 
-    def __post_init__(self) -> None :
+    def __post_init__(self) -> None:
         object.__setattr__(
             self,
             "data_flow",
@@ -51,16 +51,16 @@ class ModelVars :
 
 
 def _flow_variable_name(
-    symbol      : str,
-    source      : int,
-    path        : int,
-    transmitter : int,
-    receiver    : int,
-) -> str :
+    symbol: str,
+    source: int,
+    path: int,
+    transmitter: int,
+    receiver: int,
+) -> str:
     return f"{symbol}_k{source}_l{path}_i{transmitter}_j{receiver}"
 
 
-def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
+def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars]:
     """Create variables, domains, and Objective (6).
 
     Paper: Section III-C, Objective (6), and Constraints (23)–(25).
@@ -70,12 +70,12 @@ def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
     """
 
     problem = pulp.LpProblem(
-        name  = "tantur_2025_non_uniform_k_connectivity",
-        sense = pulp.LpMinimize,
+        name="tantur_2025_non_uniform_k_connectivity",
+        sense=pulp.LpMinimize,
     )
     sensors = env.network.sensors
-    arcs    = env.network.arcs
-    paths   = tuple(range(1, env.paper.network.maximum_paths + 1))
+    arcs = env.network.arcs
+    paths = tuple(range(1, env.paper.network.maximum_paths + 1))
 
     flow_keys = tuple(
         (source, path, transmitter, receiver)
@@ -83,15 +83,11 @@ def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
         for path in paths
         for transmitter, receiver in arcs
     )
-    path_keys = tuple(
-        (source, path)
-        for source in sensors
-        for path in paths
-    )
+    path_keys = tuple((source, path) for source in sensors for path in paths)
 
     # Paper: Section III-C and Constraint (23), f^kl_ij >= 0 integer.
     data_flow = {
-        key : problem.add_variable(
+        key: problem.add_variable(
             _flow_variable_name("f", *key),
             lowBound=0,
             cat=pulp.LpInteger,
@@ -101,7 +97,7 @@ def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
 
     # Paper: Section III-C and Constraint (23), g^kl_ij >= 0 integer.
     control_flow = {
-        key : problem.add_variable(
+        key: problem.add_variable(
             _flow_variable_name("g", *key),
             lowBound=0,
             cat=pulp.LpInteger,
@@ -111,7 +107,7 @@ def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
 
     # Paper: Section III-C and Constraint (24), h^kl_ij is binary.
     arc_used = {
-        key : problem.add_variable(
+        key: problem.add_variable(
             _flow_variable_name("h", *key),
             cat=pulp.LpBinary,
         )
@@ -120,7 +116,7 @@ def build_model(env: EnvironmentData) -> tuple[pulp.LpProblem, ModelVars] :
 
     # Paper: Section III-C and Constraint (25), p^l_k >= 0 integer.
     path_packets = {
-        key : problem.add_variable(
+        key: problem.add_variable(
             f"p_k{key[0]}_l{key[1]}",
             lowBound=0,
             cat=pulp.LpInteger,
@@ -189,14 +185,13 @@ def _add_constraint_07_flow_conservation(
     for node in env.network.nodes:
         outgoing = _outgoing_arcs(env, node)
         incoming = _incoming_arcs(env, node)
+
         for source in env.network.sensors:
             for path in _paths(env):
                 balance = pulp.lpSum(
-                    variables.data_flow[(source, path, *arc)]
-                    for arc in outgoing
+                    variables.data_flow[(source, path, *arc)] for arc in outgoing
                 ) - pulp.lpSum(
-                    variables.data_flow[(source, path, *arc)]
-                    for arc in incoming
+                    variables.data_flow[(source, path, *arc)] for arc in incoming
                 )
                 if node == source:
                     right_hand_side = variables.path_packets[(source, path)]
@@ -204,6 +199,7 @@ def _add_constraint_07_flow_conservation(
                     right_hand_side = -variables.path_packets[(source, path)]
                 else:
                     right_hand_side = 0
+
                 problem += (
                     balance == right_hand_side,
                     f"c07_flow_i{node}_k{source}_l{path}",
@@ -221,12 +217,10 @@ def _add_constraint_08_generated_packets(
         env.paper.network.packets_per_sensor_per_round
         * env.paper.network.number_of_rounds
     )
+
     for source in env.network.sensors:
         problem += (
-            pulp.lpSum(
-                variables.path_packets[(source, path)]
-                for path in _paths(env)
-            )
+            pulp.lpSum(variables.path_packets[(source, path)] for path in _paths(env))
             == generated_packets,
             f"c08_generated_k{source}",
         )
@@ -242,10 +236,9 @@ def _add_constraint_09_no_source_reentry(
     sensor_set = set(env.network.sensors)
     for source in env.network.sensors:
         incoming_from_sensors = tuple(
-            arc
-            for arc in _incoming_arcs(env, source)
-            if arc[0] in sensor_set
+            arc for arc in _incoming_arcs(env, source) if arc[0] in sensor_set
         )
+
         problem += (
             pulp.lpSum(
                 variables.data_flow[(source, path, *arc)]
@@ -268,14 +261,14 @@ def _add_constraints_10_11_flow_use_coupling(
         env.paper.network.packets_per_sensor_per_round
         * env.paper.network.number_of_rounds
     )
+
     for key, flow in variables.data_flow.items():
         source, path, transmitter, receiver = key
         used = variables.arc_used[key]
         suffix = f"k{source}_l{path}_i{transmitter}_j{receiver}"
-        problem += (
-            flow <= maximum_source_packets * used,
-            f"c10_flow_upper_{suffix}",
-        )
+
+        problem += (flow <= maximum_source_packets * used, f"c10_flow_upper_{suffix}")
+
         problem += (used <= flow, f"c11_flow_lower_{suffix}")
 
 
@@ -288,12 +281,12 @@ def _add_constraint_12_single_next_hop(
 
     for node in env.network.sensors:
         outgoing = _outgoing_arcs(env, node)
+
         for source in env.network.sensors:
             for path in _paths(env):
                 problem += (
                     pulp.lpSum(
-                        variables.arc_used[(source, path, *arc)]
-                        for arc in outgoing
+                        variables.arc_used[(source, path, *arc)] for arc in outgoing
                     )
                     <= 1,
                     f"c12_single_next_i{node}_k{source}_l{path}",
@@ -311,9 +304,7 @@ def _add_constraint_13_link_disjointness(
         for transmitter, receiver in env.network.arcs:
             problem += (
                 pulp.lpSum(
-                    variables.arc_used[
-                        (source, path, transmitter, receiver)
-                    ]
+                    variables.arc_used[(source, path, transmitter, receiver)]
                     for path in _paths(env)
                 )
                 <= 1,
@@ -330,16 +321,16 @@ def _add_constraint_14_monotone_path_index(
 
     incoming_to_bs = _incoming_arcs(env, env.network.bs_index)
     last_path = env.paper.network.maximum_paths
+
     for source in env.network.sensors:
         for path in range(1, last_path):
             next_path_ingress = pulp.lpSum(
-                variables.data_flow[(source, path + 1, *arc)]
-                for arc in incoming_to_bs
+                variables.data_flow[(source, path + 1, *arc)] for arc in incoming_to_bs
             )
             current_path_ingress = pulp.lpSum(
-                variables.data_flow[(source, path, *arc)]
-                for arc in incoming_to_bs
+                variables.data_flow[(source, path, *arc)] for arc in incoming_to_bs
             )
+
             problem += (
                 next_path_ingress <= current_path_ingress,
                 f"c14_path_order_k{source}_l{path}",
@@ -359,14 +350,9 @@ def _add_constraints_15_16_phantom_flow(
         used = variables.arc_used[key]
         packets = variables.path_packets[(source, path)]
         suffix = f"k{source}_l{path}_i{transmitter}_j{receiver}"
-        problem += (
-            flow - big_m * (1 - used) <= packets,
-            f"c15_phantom_upper_{suffix}",
-        )
-        problem += (
-            flow + big_m * (1 - used) >= packets,
-            f"c16_phantom_lower_{suffix}",
-        )
+
+        problem += (flow - big_m * (1 - used) <= packets, f"c15_phantom_upper_{suffix}")
+        problem += (flow + big_m * (1 - used) >= packets, f"c16_phantom_lower_{suffix}")
 
 
 def _add_constraints_19_20_node_disjointness(
@@ -380,8 +366,10 @@ def _add_constraints_19_20_node_disjointness(
         for relay in env.network.sensors:
             if relay == source:
                 continue
+
             outgoing = _outgoing_arcs(env, relay)
             incoming = _incoming_arcs(env, relay)
+
             problem += (
                 pulp.lpSum(
                     variables.arc_used[(source, path, *arc)]
@@ -410,17 +398,19 @@ def _add_constraint_17_control_flow(
     """Paper: Section III-C, Constraint (17)."""
 
     control_packets = (
-        env.experiment.control_to_data_frequency
-        * env.paper.network.number_of_rounds
+        env.experiment.control_to_data_frequency * env.paper.network.number_of_rounds
     )
+
     if not float(control_packets).is_integer():
         raise ValueError("xi*N_r must be integral because g is an integer variable")
 
     for key, control_flow in variables.control_flow.items():
         source, path, transmitter, receiver = key
         reverse_key = (source, path, receiver, transmitter)
+
         if reverse_key not in variables.arc_used:
             raise ValueError("Constraint (17) requires a reverse directed arc")
+
         problem += (
             control_flow
             == control_packets
@@ -439,6 +429,7 @@ def _add_constraint_18_non_uniform_connectivity(
     for source in env.network.sensors:
         outgoing = _outgoing_arcs(env, source)
         required_paths = env.connectivity.kappa_by_sensor[source]
+
         problem += (
             pulp.lpSum(
                 variables.arc_used[(source, path, *arc)]
@@ -484,9 +475,9 @@ def _add_constraint_21_energy(
             for path in _paths(env)
             for arc in incoming
         )
+
         problem += (
-            transmit_energy + receive_energy
-            <= variables.maximum_sensor_energy,
+            transmit_energy + receive_energy <= variables.maximum_sensor_energy,
             f"c21_energy_i{node}",
         )
 
@@ -507,8 +498,7 @@ def _add_constraint_22_bandwidth(
     control_bits = env.paper.network.control_packet_size_bits
     data_rate = env.paper.network.data_rate_bps
     available_time = (
-        env.paper.network.number_of_rounds
-        * env.paper.network.round_duration_s
+        env.paper.network.number_of_rounds * env.paper.network.round_duration_s
     )
 
     for node in env.network.nodes:
@@ -519,6 +509,7 @@ def _add_constraint_22_bandwidth(
             for arc in env.interference.interfering_arcs_by_node[node]
             if node not in arc
         )
+
         own_transmit_time = pulp.lpSum(
             (
                 variables.data_flow[(source, path, *arc)] * data_bits
@@ -529,6 +520,7 @@ def _add_constraint_22_bandwidth(
             for path in _paths(env)
             for arc in outgoing
         )
+
         own_receive_time = pulp.lpSum(
             (
                 variables.data_flow[(source, path, *arc)] * data_bits
@@ -539,6 +531,7 @@ def _add_constraint_22_bandwidth(
             for path in _paths(env)
             for arc in incoming
         )
+
         blocked_time = pulp.lpSum(
             (
                 variables.data_flow[(source, path, *arc)] * data_bits
@@ -549,8 +542,8 @@ def _add_constraint_22_bandwidth(
             for path in _paths(env)
             for arc in interfering
         )
+
         problem += (
-            own_transmit_time + own_receive_time + blocked_time
-            <= available_time,
+            own_transmit_time + own_receive_time + blocked_time <= available_time,
             f"c22_bandwidth_i{node}",
         )

@@ -70,6 +70,23 @@ def test_seeded_partition_is_reproducible_and_respects_counts() -> None:
     assert set(first.kappa_by_sensor) == set(sensors)
 
 
+def test_environment_uses_independent_assignment_random_stream() -> None:
+    experiment = ExperimentParameters(
+        number_of_sensors=10,
+        connectivity_counts=(5, 3, 2),
+        random_seed=42,
+    )
+    environment = build_environment(experiment)
+    assignment_seed = int(np.random.SeedSequence(42).spawn(2)[1].generate_state(1)[0])
+    expected = build_seeded_connectivity_partition(
+        environment.network.sensors,
+        experiment.connectivity_counts,
+        random_seed=assignment_seed,
+    )
+
+    assert environment.connectivity.sets_by_kappa == expected.sets_by_kappa
+
+
 def test_partition_mappings_are_immutable() -> None:
     """Implementation decision: connectivity cannot mutate during a solve."""
 

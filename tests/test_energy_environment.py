@@ -138,14 +138,17 @@ def test_energy_environment_assigns_per_arc_energy_and_reception_cost() -> None:
     level_energies = energy_environment.transmission_energy_by_level_j_per_bit
 
     assert energy_environment.reception_energy_j_per_bit == pytest.approx(0.2e-7)
-    assert energy_environment.link_transmission_energy_j_per_bit[(0, 1)] == (
-        level_energies[0]
+    assert (
+        energy_environment.link_transmission_energy_j_per_bit[(0, 1)]
+        == (level_energies[0])
     )
-    assert energy_environment.link_transmission_energy_j_per_bit[(0, 2)] == (
-        level_energies[2]
+    assert (
+        energy_environment.link_transmission_energy_j_per_bit[(0, 2)]
+        == (level_energies[2])
     )
-    assert energy_environment.link_transmission_energy_j_per_bit[(1, 2)] == (
-        level_energies[1]
+    assert (
+        energy_environment.link_transmission_energy_j_per_bit[(1, 2)]
+        == (level_energies[1])
     )
 
 

@@ -27,6 +27,10 @@ class RunResult:
     environment: EnvironmentData
     solution: Solution
     wall_time_s: float
+    solver_name: SolverName
+    time_limit_s: float
+    requested_mip_gap: float
+    threads: int | None
 
 
 def solve_experiment(
@@ -67,7 +71,8 @@ def solve_experiment(
             threads=threads,
         )
     else:
-        solver = pulp.PULP_CBC_CMD(
+        solver = pulp.COIN_CMD(
+            path=pulp.PULP_CBC_CMD.pulp_cbc_path,
             msg=solver_log,
             timeLimit=time_limit_s,
             gapRel=mip_gap,
@@ -83,6 +88,10 @@ def solve_experiment(
         environment=environment,
         solution=solution,
         wall_time_s=wall_time_s,
+        solver_name=solver_name,
+        time_limit_s=time_limit_s,
+        requested_mip_gap=mip_gap,
+        threads=threads,
     )
 
 
@@ -99,18 +108,19 @@ def scenario_i_experiment(seed: int = 42) -> ExperimentParameters:
     )
 
 
-def run_figure_3(
+def _run_figure_3_variant(
     output_directory: Path,
     *,
-    seed: int = 42,
-    time_limit_s: float = 45.0,
-    mip_gap: float = 0.15,
-    threads: int | None = None,
-    solver_name: SolverName = "highs",
-    maximum_paths: int = 2,
-    solver_log: bool = False,
+    seed: int,
+    time_limit_s: float,
+    mip_gap: float,
+    threads: int | None,
+    solver_name: SolverName,
+    maximum_paths: int,
+    solver_log: bool,
+    approximate: bool,
 ) -> tuple[RunResult, Mapping[str, Path]]:
-    """Solve Scenario-I and save Section IV-B Fig. 3(a)/(b) artifacts."""
+    """Solve one validated Scenario-I figure variant."""
 
     if maximum_paths < 2:
         raise ValueError("Scenario-I figure generation requires at least 2 paths")
@@ -138,14 +148,75 @@ def run_figure_3(
     if not result.solution.has_incumbent:
         return result, {}
 
-    from .plotting import save_figure_3_outputs
+    from .plotting import (
+        save_approximate_figure_3_outputs,
+        save_figure_3_outputs,
+    )
 
-    paths = save_figure_3_outputs(
+    writer = save_approximate_figure_3_outputs if approximate else save_figure_3_outputs
+    paths = writer(
         result.environment,
         result.solution,
         output_directory,
+        run_metadata={
+            "solver_name": result.solver_name,
+            "time_limit_s": result.time_limit_s,
+            "requested_mip_gap": result.requested_mip_gap,
+            "threads": result.threads,
+            "wall_time_s": result.wall_time_s,
+        },
     )
     return result, paths
+
+
+def run_figure_3(
+    output_directory: Path,
+    *,
+    seed: int = 42,
+    time_limit_s: float = 60.0,
+    mip_gap: float = 0.01,
+    threads: int | None = 1,
+    solver_name: SolverName = "highs",
+    solver_log: bool = False,
+) -> tuple[RunResult, Mapping[str, Path]]:
+    """Run Scenario-I with the paper's Table I N_l=5 model."""
+
+    return _run_figure_3_variant(
+        output_directory,
+        seed=seed,
+        time_limit_s=time_limit_s,
+        mip_gap=mip_gap,
+        threads=threads,
+        solver_name=solver_name,
+        maximum_paths=5,
+        solver_log=solver_log,
+        approximate=False,
+    )
+
+
+def run_approximate_figure_3(
+    output_directory: Path,
+    *,
+    seed: int = 42,
+    time_limit_s: float = 45.0,
+    mip_gap: float = 0.15,
+    threads: int | None = 1,
+    solver_name: SolverName = "highs",
+    solver_log: bool = False,
+) -> tuple[RunResult, Mapping[str, Path]]:
+    """Run the explicitly labeled tractable N_l=2 approximation."""
+
+    return _run_figure_3_variant(
+        output_directory,
+        seed=seed,
+        time_limit_s=time_limit_s,
+        mip_gap=mip_gap,
+        threads=threads,
+        solver_name=solver_name,
+        maximum_paths=2,
+        solver_log=solver_log,
+        approximate=True,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -178,9 +249,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--figure-3",
         action="store_true",
-        help="Run the 12-sensor Section IV-B Scenario-I figure workflow.",
+        help="Run Scenario-I with the paper's Table I N_l=5 model.",
     )
-    parser.add_argument("--figure-max-paths", type=int, default=2)
+    parser.add_argument(
+        "--approximate-figure-3",
+        action="store_true",
+        help="Run an explicitly labeled tractable N_l=2 approximation.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     return parser
 
@@ -188,6 +263,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _print_summary(result: RunResult) -> None:
     solution = result.solution
     print(f"Status: {solution.status}")
+    print(f"Termination: {solution.termination_reason}")
     print(f"Wall time: {result.wall_time_s:.3f} s")
     if not solution.has_incumbent:
         print("No incumbent solution is available.")
@@ -195,6 +271,8 @@ def _print_summary(result: RunResult) -> None:
 
     assert solution.objective_energy_j is not None
     print(f"epsilon: {solution.objective_energy_j / 1000.0:.6f} kJ")
+    if solution.relative_gap is not None:
+        print(f"Relative MIP gap: {solution.relative_gap:.4%}")
     print(
         "Active paths: "
         + ", ".join(
@@ -209,25 +287,44 @@ def _print_summary(result: RunResult) -> None:
     )
 
 
+def _solution_exit_code(solution: Solution) -> int:
+    if solution.status.startswith("Optimal"):
+        return 0
+    if solution.has_incumbent:
+        return 3
+    return 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a small experiment or the Fig. 3(a)/(b) workflow."""
 
     arguments = _build_parser().parse_args(argv)
-    if arguments.figure_3:
-        result, paths = run_figure_3(
+    if arguments.figure_3 and arguments.approximate_figure_3:
+        raise ValueError("select only one Figure-3 workflow")
+    if arguments.figure_3 or arguments.approximate_figure_3:
+        approximate = arguments.approximate_figure_3
+        runner = run_approximate_figure_3 if approximate else run_figure_3
+        result, paths = runner(
             arguments.output_dir,
             seed=arguments.seed,
-            time_limit_s=arguments.time_limit or 45.0,
-            mip_gap=0.15 if arguments.mip_gap is None else arguments.mip_gap,
-            threads=arguments.threads,
+            time_limit_s=(
+                (45.0 if approximate else 60.0)
+                if arguments.time_limit is None
+                else arguments.time_limit
+            ),
+            mip_gap=(
+                (0.15 if approximate else 0.01)
+                if arguments.mip_gap is None
+                else arguments.mip_gap
+            ),
+            threads=1 if arguments.threads is None else arguments.threads,
             solver_name=arguments.solver or "highs",
-            maximum_paths=arguments.figure_max_paths,
             solver_log=arguments.solver_log,
         )
         _print_summary(result)
         for label, path in paths.items():
             print(f"{label}: {path}")
-        return 0 if result.solution.has_incumbent else 2
+        return _solution_exit_code(result.solution)
 
     counts = arguments.connectivity_counts
     if counts is None:
@@ -242,14 +339,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = solve_experiment(
         experiment,
         two_dimensional=arguments.two_dimensional,
-        time_limit_s=arguments.time_limit or 60.0,
+        time_limit_s=60.0 if arguments.time_limit is None else arguments.time_limit,
         mip_gap=0.01 if arguments.mip_gap is None else arguments.mip_gap,
         threads=arguments.threads,
         solver_name=arguments.solver or "highs",
         solver_log=arguments.solver_log,
     )
     _print_summary(result)
-    return 0 if result.solution.has_incumbent else 2
+    return _solution_exit_code(result.solution)
 
 
 if __name__ == "__main__":

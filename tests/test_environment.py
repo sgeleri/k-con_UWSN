@@ -164,9 +164,7 @@ def test_invalid_deployment_positions_are_rejected(positions: np.ndarray) -> Non
 def test_network_environment_rejects_arc_beyond_range() -> None:
     """Environment consistency check for the Section III-A arc definition."""
 
-    deployment = Deployment(
-        np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]])
-    )
+    deployment = Deployment(np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]))
     distances = pairwise_distances(deployment.positions_m)
 
     with pytest.raises(ValueError, match="exceeds"):

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import platform
+import sys
 from collections import defaultdict
 from collections.abc import Mapping
+from hashlib import sha256
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -111,9 +115,39 @@ def _aggregate_data_flow(solution: Solution) -> dict[DirectedArc, float]:
     return dict(totals)
 
 
-def _draw_flow_lines(ax: Axes, env: EnvironmentData, solution: Solution) -> None:
+def _draw_individual_flows(
+    ax: Axes,
+    env: EnvironmentData,
+    solution: Solution,
+) -> None:
     positions = _positions_km(env)
-    totals = _aggregate_data_flow(solution)
+    for (_, _, transmitter, receiver), packets in solution.data_flow_packets.items():
+        if packets <= 0:
+            continue
+        start = positions[transmitter]
+        stop = positions[receiver]
+        ax.plot(
+            (start[0], stop[0]),
+            (start[1], stop[1]),
+            color="0.65",
+            alpha=0.16,
+            linewidth=0.7,
+            zorder=1,
+        )
+
+
+def _draw_bottleneck_relay_flow(
+    ax: Axes,
+    env: EnvironmentData,
+    solution: Solution,
+    bottleneck: int,
+) -> None:
+    positions = _positions_km(env)
+    totals = {
+        arc: packets
+        for arc, packets in _aggregate_data_flow(solution).items()
+        if bottleneck in arc
+    }
     largest_flow = max(totals.values(), default=1.0)
     for (transmitter, receiver), packets in totals.items():
         start = positions[transmitter]
@@ -124,7 +158,7 @@ def _draw_flow_lines(ax: Axes, env: EnvironmentData, solution: Solution) -> None
             (start[1], stop[1]),
             linestyle="--",
             color="0.45",
-            alpha=0.30,
+            alpha=0.55,
             linewidth=width,
             zorder=1,
         )
@@ -184,8 +218,9 @@ def plot_scenario_i(
     energy_kj = np.asarray(
         [solution.node_energy_j[sensor] / 1000.0 for sensor in sensors]
     )
-    _draw_flow_lines(ax, env, solution)
     bottleneck = max(solution.node_energy_j, key=solution.node_energy_j.__getitem__)
+    _draw_individual_flows(ax, env, solution)
+    _draw_bottleneck_relay_flow(ax, env, solution, bottleneck)
     _draw_bottleneck_paths(ax, env, solution, bottleneck)
 
     sensor_plot = ax.scatter(
@@ -203,18 +238,39 @@ def plot_scenario_i(
     _draw_bs_and_labels(ax, env)
     _format_topology_axes(ax, env)
     assert solution.objective_energy_j is not None
+    gap_text = (
+        f", gap={solution.relative_gap:.1%}"
+        if solution.relative_gap is not None and solution.relative_gap > 1e-7
+        else ""
+    )
     ax.set_title(
         "(b) Scenario-I\n"
         f"bottleneck=node {bottleneck}, "
-        f"epsilon={solution.objective_energy_j / 1000.0:.3f} kJ"
+        f"epsilon={solution.objective_energy_j / 1000.0:.3f} kJ{gap_text}"
     )
     ax.legend(loc="upper right", fontsize=7)
     return figure, ax
 
 
-def _metadata(env: EnvironmentData, solution: Solution) -> dict[str, object]:
+def _package_version(distribution: str) -> str | None:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return None
+
+
+def _metadata(
+    env: EnvironmentData,
+    solution: Solution,
+    *,
+    run_metadata: Mapping[str, object] | None,
+    artifact_paths: Mapping[str, Path],
+    paper_reference: str | None,
+    artifact_kind: str,
+) -> dict[str, object]:
     return {
-        "paper_reference": "Section IV-B, Fig. 3(a)-(b), Table III Scenario-I",
+        "artifact_kind": artifact_kind,
+        "paper_reference": paper_reference,
         "reproduction_note": _REPRODUCTION_NOTE,
         "random_seed": env.experiment.random_seed,
         "volume_km": list(env.experiment.volume_km),
@@ -222,34 +278,76 @@ def _metadata(env: EnvironmentData, solution: Solution) -> dict[str, object]:
         "connectivity_counts": list(env.experiment.connectivity_counts),
         "maximum_paths": env.paper.network.maximum_paths,
         "model_deviation": (
-            "Figure workflow uses N_l=2 for open-source solver tractability; "
-            "the default paper model retains Table I N_l=5."
+            "Approximate workflow uses N_l=2 for open-source solver "
+            "tractability instead of Table I N_l=5."
             if env.paper.network.maximum_paths == 2
             else None
         ),
         "status": solution.status,
+        "termination_reason": solution.termination_reason,
+        "pulp_status": solution.pulp_status,
+        "pulp_solution_status": solution.pulp_solution_status,
         "epsilon_j": solution.objective_energy_j,
-        "active_path_count_by_source": dict(
-            solution.active_path_count_by_source
-        ),
+        "best_bound_j": solution.best_bound_j,
+        "relative_gap": solution.relative_gap,
+        "software_versions": {
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "kcon-uwsn": _package_version("kcon-uwsn"),
+            "numpy": _package_version("numpy"),
+            "matplotlib": _package_version("matplotlib"),
+            "pulp": _package_version("pulp"),
+            "highspy": _package_version("highspy"),
+        },
+        "run_configuration": dict(run_metadata or {}),
+        "artifact_sha256": {
+            label: sha256(path.read_bytes()).hexdigest()
+            for label, path in artifact_paths.items()
+        },
+        "active_path_count_by_source": dict(solution.active_path_count_by_source),
     }
 
 
-def save_figure_3_outputs(
+def _save_outputs(
     env: EnvironmentData,
     solution: Solution,
     output_directory: Path,
+    *,
+    run_metadata: Mapping[str, object] | None = None,
+    figure_3: bool,
+    approximate: bool = False,
 ) -> Mapping[str, Path]:
-    """Save separate/combined Fig. 3(a)/(b) images and deterministic metadata."""
+    """Save generic topology/scenario images and reproducibility metadata."""
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    topology_path = output_directory / "figure_3a_network_topology.png"
-    scenario_path = output_directory / "figure_3b_scenario_i.png"
-    combined_path = output_directory / "figure_3ab_scenario_i.png"
-    metadata_path = output_directory / "figure_3ab_metadata.json"
+    if figure_3 and not approximate:
+        topology_path = output_directory / "figure_3a_network_topology.png"
+        scenario_path = output_directory / "figure_3b_scenario_i.png"
+        combined_path = output_directory / "figure_3ab_scenario_i.png"
+        metadata_path = output_directory / "figure_3ab_metadata.json"
+    elif approximate:
+        topology_path = output_directory / "approximate_figure_3a_topology.png"
+        scenario_path = output_directory / "approximate_figure_3b_scenario_i.png"
+        combined_path = output_directory / "approximate_figure_3ab_scenario_i.png"
+        metadata_path = output_directory / "approximate_figure_3ab_metadata.json"
+    else:
+        topology_path = output_directory / "network_topology.png"
+        scenario_path = output_directory / "scenario_i.png"
+        combined_path = output_directory / "topology_and_scenario_i.png"
+        metadata_path = output_directory / "scenario_metadata.json"
     png_metadata = {
-        "Title": "Tantur 2025 Fig. 3(a)-(b) methodological reproduction",
-        "Description": _REPRODUCTION_NOTE,
+        "Title": (
+            "Tantur 2025 Fig. 3(a)-(b) methodological reproduction"
+            if figure_3 and not approximate
+            else "Approximation inspired by Tantur 2025 Fig. 3(a)-(b)"
+            if approximate
+            else "UWSN topology and Scenario-I plots"
+        ),
+        "Description": (
+            _REPRODUCTION_NOTE
+            if figure_3 or approximate
+            else "Generated topology and Scenario-I solution plots."
+        ),
     }
 
     figure_a, _ = plot_network_topology(env)
@@ -268,17 +366,124 @@ def save_figure_3_outputs(
     )
     plot_network_topology(env, ax=axes[0])
     plot_scenario_i(env, solution, ax=axes[1])
-    combined.suptitle("Section IV-B Scenario-I — deterministic reproduction")
+    if approximate:
+        combined_title = "Section IV-B Scenario-I — explicit N_l=2 approximation"
+    elif figure_3:
+        combined_title = "Section IV-B Scenario-I — reproduction"
+    else:
+        combined_title = "UWSN topology and Scenario-I output"
+    combined.suptitle(combined_title)
     combined.savefig(combined_path, dpi=200, metadata=png_metadata)
     plt.close(combined)
 
-    metadata_path.write_text(
-        json.dumps(_metadata(env, solution), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return {
+    artifact_paths = {
         "figure_3a": topology_path,
         "figure_3b": scenario_path,
         "figure_3ab": combined_path,
+    }
+    metadata_path.write_text(
+        json.dumps(
+            _metadata(
+                env,
+                solution,
+                run_metadata=run_metadata,
+                artifact_paths=artifact_paths,
+                paper_reference=(
+                    "Section IV-B, Fig. 3(a)-(b), Table III Scenario-I"
+                    if figure_3 and not approximate
+                    else "Approximation inspired by Section IV-B Fig. 3(a)-(b)"
+                    if approximate
+                    else None
+                ),
+                artifact_kind=(
+                    "paper-model-methodological-reproduction"
+                    if figure_3 and not approximate
+                    else "explicit-n_l-2-approximation"
+                    if approximate
+                    else "generic-scenario-output"
+                ),
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        **artifact_paths,
         "metadata": metadata_path,
     }
+
+
+def save_scenario_outputs(
+    env: EnvironmentData,
+    solution: Solution,
+    output_directory: Path,
+    *,
+    run_metadata: Mapping[str, object] | None = None,
+) -> Mapping[str, Path]:
+    """Save generic topology/scenario images without a Fig. 3 claim."""
+
+    return _save_outputs(
+        env,
+        solution,
+        output_directory,
+        run_metadata=run_metadata,
+        figure_3=False,
+    )
+
+
+def _validate_figure_3_environment(env: EnvironmentData) -> None:
+    """Guard the paper-specific filename/metadata contract."""
+
+    if len(env.network.sensors) != 12:
+        raise ValueError("Fig. 3 requires exactly 12 sensor nodes")
+    if env.experiment.volume_km != (1.0, 1.0, 0.30):
+        raise ValueError("Fig. 3 requires the Section IV-B 1x1x0.30 km volume")
+    if env.experiment.connectivity_counts != (12, 0, 0):
+        raise ValueError("Fig. 3(b) requires Table III Scenario-I")
+    if not np.allclose(env.network.deployment.positions_m[:, 2], 0.0):
+        raise ValueError("Fig. 3 requires a two-dimensional deployment")
+
+
+def save_figure_3_outputs(
+    env: EnvironmentData,
+    solution: Solution,
+    output_directory: Path,
+    *,
+    run_metadata: Mapping[str, object] | None = None,
+) -> Mapping[str, Path]:
+    """Save validated Section IV-B Fig. 3(a)/(b) reproduction artifacts."""
+
+    _validate_figure_3_environment(env)
+    if env.paper.network.maximum_paths != 5:
+        raise ValueError("paper-model Fig. 3 output requires Table I N_l=5")
+    return _save_outputs(
+        env,
+        solution,
+        output_directory,
+        run_metadata=run_metadata,
+        figure_3=True,
+    )
+
+
+def save_approximate_figure_3_outputs(
+    env: EnvironmentData,
+    solution: Solution,
+    output_directory: Path,
+    *,
+    run_metadata: Mapping[str, object] | None = None,
+) -> Mapping[str, Path]:
+    """Save explicitly labeled tractable N_l=2 Scenario-I approximation."""
+
+    _validate_figure_3_environment(env)
+    if env.paper.network.maximum_paths != 2:
+        raise ValueError("approximate Figure-3 output requires N_l=2")
+    return _save_outputs(
+        env,
+        solution,
+        output_directory,
+        run_metadata=run_metadata,
+        figure_3=False,
+        approximate=True,
+    )

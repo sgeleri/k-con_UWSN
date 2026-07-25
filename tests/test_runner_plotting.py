@@ -2,16 +2,30 @@
 
 import hashlib
 import json
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib
+import pulp
 import pytest
 
 matplotlib.use("Agg")
 
-from kcon_uwsn.params import ExperimentParameters
-from kcon_uwsn.plotting import save_figure_3_outputs
-from kcon_uwsn.run import main, scenario_i_experiment, solve_experiment
+from kcon_uwsn.environment import build_environment
+from kcon_uwsn.params import (
+    ExperimentParameters,
+    NetworkParameters,
+    PaperParameters,
+)
+from kcon_uwsn.plotting import save_figure_3_outputs, save_scenario_outputs
+from kcon_uwsn.run import (
+    _solution_exit_code,
+    main,
+    run_approximate_figure_3,
+    scenario_i_experiment,
+    solve_experiment,
+)
 
 
 @pytest.fixture(scope="module")
@@ -100,11 +114,18 @@ def test_cli_small_case_reports_solution(capsys) -> None:
     assert "Active paths:" in output
 
 
+def test_feasible_unproven_incumbent_uses_distinct_exit_code(small_run) -> None:
+    feasible = replace(small_run.solution, status="Feasible")
+
+    assert _solution_exit_code(feasible) == 3
+    assert _solution_exit_code(small_run.solution) == 0
+
+
 def test_figure_outputs_and_metadata_are_created(
     small_run,
     tmp_path: Path,
 ) -> None:
-    paths = save_figure_3_outputs(
+    paths = save_scenario_outputs(
         small_run.environment,
         small_run.solution,
         tmp_path,
@@ -114,19 +135,25 @@ def test_figure_outputs_and_metadata_are_created(
     assert all(path.exists() and path.stat().st_size > 0 for path in paths.values())
 
     metadata = json.loads(paths["metadata"].read_text(encoding="utf-8"))
-    assert metadata["paper_reference"].startswith("Section IV-B")
+    assert metadata["paper_reference"] is None
     assert "does not publish" in metadata["reproduction_note"]
     assert len(metadata["positions_m"]) == 3
     assert metadata["status"] == "Optimal"
+    assert metadata["software_versions"]["pulp"] == pulp.__version__
+    assert set(metadata["artifact_sha256"]) == {
+        "figure_3a",
+        "figure_3b",
+        "figure_3ab",
+    }
 
 
 def test_topology_figure_is_deterministic(small_run, tmp_path: Path) -> None:
-    first = save_figure_3_outputs(
+    first = save_scenario_outputs(
         small_run.environment,
         small_run.solution,
         tmp_path / "first",
     )
-    second = save_figure_3_outputs(
+    second = save_scenario_outputs(
         small_run.environment,
         small_run.solution,
         tmp_path / "second",
@@ -135,3 +162,97 @@ def test_topology_figure_is_deterministic(small_run, tmp_path: Path) -> None:
     first_hash = hashlib.sha256(first["figure_3a"].read_bytes()).digest()
     second_hash = hashlib.sha256(second["figure_3a"].read_bytes()).digest()
     assert first_hash == second_hash
+
+
+def test_figure_3_writer_rejects_non_paper_scale_fixture(
+    small_run,
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="12 sensor"):
+        save_figure_3_outputs(
+            small_run.environment,
+            small_run.solution,
+            tmp_path,
+        )
+
+
+def test_paper_labeled_figure_writer_rejects_n_l_2(
+    small_run,
+    tmp_path: Path,
+) -> None:
+    environment = build_environment(
+        scenario_i_experiment(),
+        paper=PaperParameters(
+            network=NetworkParameters(
+                maximum_paths=2,
+                connectivity_range=(1, 2),
+            )
+        ),
+        explicit_connectivity_sets={1: tuple(range(1, 13)), 2: ()},
+        two_dimensional=True,
+    )
+
+    with pytest.raises(ValueError, match="N_l=5"):
+        save_figure_3_outputs(environment, small_run.solution, tmp_path)
+
+
+def test_cli_rejects_zero_time_limit() -> None:
+    with pytest.raises(ValueError, match="time_limit_s"):
+        main(["--time-limit", "0"])
+    with pytest.raises(ValueError, match="time_limit_s"):
+        main(["--figure-3", "--time-limit", "0"])
+
+
+@pytest.mark.skipif(
+    not pulp.COIN_CMD(
+        path=pulp.PULP_CBC_CMD.pulp_cbc_path,
+        msg=False,
+    ).available(),
+    reason="CBC executable is unavailable",
+)
+def test_short_time_limited_cbc_run_does_not_crash_extraction() -> None:
+    experiment = ExperimentParameters(
+        number_of_sensors=4,
+        volume_km=(0.2, 0.2, 0.1),
+        connectivity_counts=(4, 0, 0),
+    )
+
+    result = solve_experiment(
+        experiment,
+        two_dimensional=True,
+        time_limit_s=0.001,
+        solver_name="cbc",
+    )
+
+    assert result.solution.status in {
+        "Optimal",
+        "Optimal within solver tolerance",
+        "Feasible",
+        "No Solution",
+        "Invalid Incumbent",
+    }
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("RUN_SLOW_FIGURE_TEST") != "1",
+    reason="set RUN_SLOW_FIGURE_TEST=1 to run the full Figure 3 solve",
+)
+def test_approximate_figure_3_workflow_end_to_end(tmp_path: Path) -> None:
+    result, paths = run_approximate_figure_3(
+        tmp_path,
+        seed=42,
+        threads=1,
+        time_limit_s=45.0,
+        mip_gap=0.15,
+    )
+
+    assert result.solution.has_incumbent
+    assert set(paths) == {"figure_3a", "figure_3b", "figure_3ab", "metadata"}
+    metadata = json.loads(paths["metadata"].read_text(encoding="utf-8"))
+    assert len(metadata["positions_m"]) == 13
+    assert metadata["random_seed"] == 42
+    assert metadata["maximum_paths"] == 2
+    assert metadata["artifact_kind"] == "explicit-n_l-2-approximation"
+    assert metadata["connectivity_counts"] == [12, 0, 0]
+    assert metadata["run_configuration"]["threads"] == 1

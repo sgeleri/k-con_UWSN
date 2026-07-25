@@ -6,7 +6,7 @@ import pytest
 from kcon_uwsn.environment import EnvironmentData, build_environment
 from kcon_uwsn.model import ModelVars, build_model
 from kcon_uwsn.params import ExperimentParameters
-from kcon_uwsn.solution import Solution, extract_solution
+from kcon_uwsn.solution import Solution, _ordered_path, extract_solution
 
 
 @pytest.fixture(scope="module")
@@ -21,10 +21,14 @@ def solved_case() -> tuple[EnvironmentData, ModelVars, Solution]:
     problem, variables = build_model(environment)
     status = problem.solve(pulp.HiGHS(msg=False))
     assert pulp.LpStatus[status] == "Optimal"
-    return environment, variables, extract_solution(
-        problem,
-        variables,
+    return (
         environment,
+        variables,
+        extract_solution(
+            problem,
+            variables,
+            environment,
+        ),
     )
 
 
@@ -41,7 +45,8 @@ def test_unsolved_problem_returns_status_without_values() -> None:
 
     solution = extract_solution(problem, variables, environment)
 
-    assert solution.status == "Not Solved"
+    assert solution.status == "No Solution"
+    assert solution.pulp_status == "Not Solved"
     assert not solution.has_incumbent
     assert solution.objective_energy_j is None
     assert solution.paths == {}
@@ -65,6 +70,37 @@ def test_relaxation_values_without_integer_incumbent_are_not_extracted() -> None
 
     assert not solution.has_incumbent
     assert solution.objective_energy_j is None
+
+
+def test_integer_feasible_status_is_not_reported_as_optimal() -> None:
+    """Regression: a limit-reached incumbent is feasible, not proven optimal."""
+
+    experiment = ExperimentParameters(
+        number_of_sensors=2,
+        volume_km=(0.1, 0.1, 0.1),
+        connectivity_counts=(2, 0, 0),
+    )
+    environment = build_environment(experiment, two_dimensional=True)
+    problem, variables = build_model(environment)
+    problem.solve(pulp.HiGHS(msg=False))
+    problem.sol_status = pulp.LpSolutionIntegerFeasible
+
+    solution = extract_solution(problem, variables, environment)
+
+    assert solution.status == "Feasible"
+    assert solution.has_incumbent
+    assert solution.pulp_solution_status == "Solution Found"
+
+
+def test_path_extraction_reports_disconnected_extraneous_cycle() -> None:
+    path, extraneous = _ordered_path(
+        source=1,
+        bs_index=0,
+        active_arcs=((1, 2), (2, 0), (3, 4), (4, 3)),
+    )
+
+    assert path == ((1, 2), (2, 0))
+    assert extraneous == ((3, 4), (4, 3))
 
 
 def test_solution_exposes_status_objective_and_sparse_values(
@@ -95,8 +131,7 @@ def test_reconstructed_paths_are_contiguous_source_to_bs(
         assert arcs[0][0] == source
         assert arcs[-1][1] == environment.network.bs_index
         assert all(
-            first[1] == second[0]
-            for first, second in zip(arcs, arcs[1:], strict=False)
+            first[1] == second[0] for first, second in zip(arcs, arcs[1:], strict=False)
         )
         assert len({node for arc in arcs for node in arc}) == len(arcs) + 1
 
@@ -144,8 +179,7 @@ def test_airtime_diagnostics_satisfy_constraint_22(
 
     assert set(solution.node_airtime_s) == set(environment.network.nodes)
     assert all(
-        value <= available_time + 1e-7
-        for value in solution.node_airtime_s.values()
+        value <= available_time + 1e-7 for value in solution.node_airtime_s.values()
     )
     assert solution.maximum_airtime_violation_s <= 1e-7
 
