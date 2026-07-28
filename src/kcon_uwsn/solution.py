@@ -12,40 +12,41 @@ from .environment import DirectedArc, EnvironmentData
 from .model import FlowKey, ModelVars, PathKey
 
 
-def _frozen_mapping(values: Mapping[object, object]) -> Mapping[object, object]:
+def _frozen_mapping(values: Mapping[object, object]) -> Mapping[object, object] :
     return MappingProxyType(dict(values))
 
 
+"""
+    Structured values and paper-specific diagnostics from one solve.
+"""
 @dataclass(frozen=True, slots=True)
-class Solution:
-    """Structured values and paper-specific diagnostics from one solve."""
+class Solution :
+    status_code          : int
+    status               : str
+    termination_reason   : str
+    pulp_status          : str
+    pulp_solution_status : str
+    objective_energy_j   : float | None
+    best_bound_j         : float | None
+    relative_gap         : float | None
+    solve_time_s         : float | None
 
-    status_code: int
-    status: str
-    termination_reason: str
-    pulp_status: str
-    pulp_solution_status: str
-    objective_energy_j: float | None
-    best_bound_j: float | None
-    relative_gap: float | None
-    solve_time_s: float | None
+    data_flow_packets    : Mapping[FlowKey, float]
+    control_flow_packets : Mapping[FlowKey, float]
+    active_arcs          : Mapping[FlowKey, int]
+    path_packets         : Mapping[PathKey, float]
+    paths                : Mapping[PathKey, tuple[DirectedArc, ...]]
+    extraneous_arcs      : Mapping[PathKey, tuple[DirectedArc, ...]]
 
-    data_flow_packets: Mapping[FlowKey, float]
-    control_flow_packets: Mapping[FlowKey, float]
-    active_arcs: Mapping[FlowKey, int]
-    path_packets: Mapping[PathKey, float]
-    paths: Mapping[PathKey, tuple[DirectedArc, ...]]
-    extraneous_arcs: Mapping[PathKey, tuple[DirectedArc, ...]]
+    node_energy_j                    : Mapping[int, float]
+    node_airtime_s                   : Mapping[int, float]
+    active_path_count_by_source      : Mapping[int, int]
+    packet_balance_error_by_source   : Mapping[int, float]
+    connectivity_shortfall_by_source : Mapping[int, int]
+    maximum_energy_violation_j       : float
+    maximum_airtime_violation_s      : float
 
-    node_energy_j: Mapping[int, float]
-    node_airtime_s: Mapping[int, float]
-    active_path_count_by_source: Mapping[int, int]
-    packet_balance_error_by_source: Mapping[int, float]
-    connectivity_shortfall_by_source: Mapping[int, int]
-    maximum_energy_violation_j: float
-    maximum_airtime_violation_s: float
-
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None :
         mapping_fields = (
             "data_flow_packets",
             "control_flow_packets",
@@ -67,10 +68,9 @@ class Solution:
                 _frozen_mapping(getattr(self, field_name)),
             )
 
+    """Return whether the solver supplied variable values."""
     @property
     def has_incumbent(self) -> bool :
-        """Return whether the solver supplied variable values."""
-
         return self.objective_energy_j is not None
 
 
@@ -93,15 +93,14 @@ def _sparse_values(
     }
 
 
+"""Extract the source-to-BS component and retain any extraneous arcs."""
 def _ordered_path(
     source      : int,
     bs_index    : int,
     active_arcs : tuple[DirectedArc, ...],
 ) -> tuple[tuple[DirectedArc, ...], tuple[DirectedArc, ...]] :
-    """Extract the source-to-BS component and retain any extraneous arcs."""
-
     remaining                   = set(active_arcs)
-    ordered : list[DirectedArc] = []
+    ordered                     : list[DirectedArc] = []
     current                     = source
     visited                     = {source}
 
@@ -157,16 +156,15 @@ def _reconstruct_paths(
     return paths, extraneous
 
 
+"""Evaluate Constraint (21) from extracted values."""
 def _node_energy(
     env             : EnvironmentData,
     data_flow       : Mapping[FlowKey, float],
     control_flow    : Mapping[FlowKey, float],
 ) -> dict[int, float] :
-    """Evaluate Constraint (21) from extracted values."""
-
     data_bits                   = env.paper.network.data_packet_size_bits
     control_bits                = env.paper.network.control_packet_size_bits
-    energies : dict[int, float] = {}
+    energies                    : dict[int, float] = {}
 
     for node in env.network.sensors :
         total = 0.0
@@ -189,18 +187,16 @@ def _node_energy(
         energies[node] = total
     return energies
 
-
+"""Evaluate Constraint (22) with the documented ``A\\{i}`` interpretation."""
 def _node_airtime(
     env             : EnvironmentData,
     data_flow       : Mapping[FlowKey, float],
     control_flow    : Mapping[FlowKey, float],
 ) -> dict[int, float] :
-    """Evaluate Constraint (22) with the documented ``A\\{i}`` interpretation."""
-
-    data_bits                  = env.paper.network.data_packet_size_bits
-    control_bits               = env.paper.network.control_packet_size_bits
-    data_rate                  = env.paper.network.data_rate_bps
-    airtime : dict[int, float] = {}
+    data_bits    = env.paper.network.data_packet_size_bits
+    control_bits = env.paper.network.control_packet_size_bits
+    data_rate    = env.paper.network.data_rate_bps
+    airtime      : dict[int, float] = {}
 
     for node in env.network.nodes :
         interfering = {
@@ -262,13 +258,12 @@ def _status_only_solution(
     )
 
 
+"""Reject solver relaxation values mislabeled as a MIP incumbent."""
 def _has_valid_integer_incumbent(
     problem     : pulp.LpProblem,
     variables   : ModelVars,
     tolerance   : float,
 ) -> bool :
-    """Reject solver relaxation values mislabeled as a MIP incumbent."""
-
     integer_variables = (
         *variables.data_flow.values(),
         *variables.control_flow.values(),
@@ -286,12 +281,10 @@ def _has_valid_integer_incumbent(
         constraint.valid(feasibility_tolerance) for constraint in problem.constraints()
     )
 
-
+"""Read termination reason and MIP bounds when the backend exposes them."""
 def _solver_diagnostics(
     problem: pulp.LpProblem,
 ) -> tuple[str, float | None, float | None] :
-    """Read termination reason and MIP bounds when the backend exposes them."""
-
     solver_model = getattr(problem, "solverModel", None)
     if solver_model is None :
         return pulp.LpStatus[problem.status], None, None
@@ -303,6 +296,14 @@ def _solver_diagnostics(
         return pulp.LpStatus[problem.status], None, None
 
 
+"""
+    Extract values, paths, and diagnostics without exposing PuLP objects.
+
+    Paper references:
+    - Objective (6): ``objective_energy_j``.
+    - Constraints (8), (18), (21), and (22): diagnostic residuals.
+    - Constraints (12)–(20): ordered source-to-BS path reconstruction.
+"""
 def extract_solution(
     problem     : pulp.LpProblem,
     variables   : ModelVars,
@@ -310,14 +311,6 @@ def extract_solution(
     *,
     tolerance   : float = 1e-7,
 ) -> Solution :
-    """Extract values, paths, and diagnostics without exposing PuLP objects.
-
-    Paper references:
-    - Objective (6): ``objective_energy_j``.
-    - Constraints (8), (18), (21), and (22): diagnostic residuals.
-    - Constraints (12)–(20): ordered source-to-BS path reconstruction.
-    """
-
     if tolerance <= 0 :
         raise ValueError("tolerance must be positive")
     
@@ -382,27 +375,27 @@ def extract_solution(
         solution_status = "Feasible"
 
     return Solution(
-        status_code                         = problem.status,
-        status                              = solution_status,
-        termination_reason                  = termination_reason,
-        pulp_status                         = pulp.LpStatus[problem.status],
-        pulp_solution_status                = pulp.LpSolution[problem.sol_status],
-        objective_energy_j                  = objective,
-        best_bound_j                        = best_bound,
-        relative_gap                        = relative_gap,
-        solve_time_s                        = getattr(problem, "solutionTime", None),
-        data_flow_packets                   = data_flow,
-        control_flow_packets                = control_flow,
-        active_arcs                         = active_arcs,
-        path_packets                        = path_packets,
-        paths                               = paths,
-        extraneous_arcs                     = extraneous_arcs,
-        node_energy_j                       = node_energy,
-        node_airtime_s                      = node_airtime,
-        active_path_count_by_source         = path_counts,
-        packet_balance_error_by_source      = packet_errors,
-        connectivity_shortfall_by_source    = shortfalls,
-        maximum_energy_violation_j          = max(
+        status_code                      = problem.status,
+        status                           = solution_status,
+        termination_reason               = termination_reason,
+        pulp_status                      = pulp.LpStatus[problem.status],
+        pulp_solution_status             = pulp.LpSolution[problem.sol_status],
+        objective_energy_j               = objective,
+        best_bound_j                     = best_bound,
+        relative_gap                     = relative_gap,
+        solve_time_s                     = getattr(problem, "solutionTime", None),
+        data_flow_packets                = data_flow,
+        control_flow_packets             = control_flow,
+        active_arcs                      = active_arcs,
+        path_packets                     = path_packets,
+        paths                            = paths,
+        extraneous_arcs                  = extraneous_arcs,
+        node_energy_j                    = node_energy,
+        node_airtime_s                   = node_airtime,
+        active_path_count_by_source      = path_counts,
+        packet_balance_error_by_source   = packet_errors,
+        connectivity_shortfall_by_source = shortfalls,
+        maximum_energy_violation_j       = max(
             0.0,
             max(node_energy.values(), default=0.0) - objective,
         ),
